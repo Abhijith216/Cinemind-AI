@@ -103,6 +103,46 @@ cd ../frontend && npm run typecheck && npm run build         # TSC OK, build OK
 `app/services/ingestion/`: TMDb client, upsert service, resumable CLI.
 Requires `TMDB_API_KEY` in `backend/.env`.
 
+### ✅ Database schema (designed + migrated)
+
+```
+movies               id, tmdb_id (uniq), title, overview, release_year, runtime,
+                     genres JSONB[], keywords JSONB[], language, poster_path,
+                     vote_average, vote_count, popularity,
+                     embedding vector(1536)  ← pgvector,
+                     personality JSONB {emotion, mind_blowing, darkness, humor,
+                       violence, romance, hopefulness, plot_complexity,
+                       rewatchability} — each 0-100, enforced by Pydantic
+users                id, email (uniq), hashed_password, created_at
+user_taste_profiles  user_id PK/FK, likes JSONB[], dislikes JSONB[],
+                     favorite_themes JSONB[], updated_at
+ratings              id, user_id FK, movie_id FK, score (CHECK 1-10), rated_at,
+                     UNIQUE (user_id, movie_id)
+taste_snapshots      id, user_id FK, month ('2026-09'), dominant_genres JSONB[],
+                     dominant_themes JSONB[], created_at, UNIQUE (user_id, month)
+```
+
+Indexes: `tmdb_id` unique btree · **GIN** on `movies.genres`,
+`movies.keywords` · **HNSW cosine** on `movies.embedding`
+(`vector_cosine_ops` — HNSW chosen over ivfflat; needs no reindex training
+and pgvector ≥ 0.5 on the `pgvector/pgvector:pg17` image supports it) ·
+unique `(user_id, movie_id)` on ratings · unique `(user_id, month)` on
+snapshots.
+
+**Verify against the Docker Postgres:**
+
+```bash
+docker compose up -d db
+cd backend && DATABASE_URL=postgresql+asyncpg://cinemind:cinemind@localhost:5432/cinemind \
+  ../.venv/Scripts/python -m alembic upgrade head
+cd ..
+docker compose exec db psql -U cinemind -d cinemind -c '\d movies'
+docker compose exec db psql -U cinemind -d cinemind -c '\di'
+```
+
+`\d movies` should list the vector column (`vector(1536)`) and the three
+indexes; `\di` shows the GIN/HNSW/unique indexes across all tables.
+
 ### Module 2 — Embedding generation *(pending)*
 
 Synopsis + themes + keywords → `text-embedding-3-large` vector stored in
