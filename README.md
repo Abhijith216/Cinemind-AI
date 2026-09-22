@@ -298,11 +298,64 @@ Sample response shape (from a seeded DB):
 cd backend && ../.venv/Scripts/python -m pytest tests -q   # 54 passed
 ```
 
-### Modules 4–9 *(pending)*
+### ✅ Module 4 — LLM query understanding *(done)*
 
-LLM query understanding · explainable recommendations · user taste profile ·
-movie personality vector · conversational orchestration · chat UI, movie
-cards, explanation panel, taste evolution chart.
+`app/services/query_understanding.py` + shared `app/services/llm_client.py`.
+
+- `parse_query(user_text, conversation_history)` → `QueryIntent`
+  (`app/schemas/intent.py`): `{mood, pace, ending_type, themes,
+  themes_exclude, genres_include, genres_exclude, violence_tolerance,
+  similar_to, time_period, runtime_max, clarifying_question}`.
+  Documented extension: `themes_exclude`, because "like Interstellar but
+  **not about space**" is a theme exclusion the agreed fields can't express.
+- Strictly **JSON mode** (`response_format: json_object`, temperature 0) +
+  Pydantic validation + ONE self-repair round-trip feeding the validation
+  error back to the model. No regex parsing of model output, ever.
+- Ambiguous requests ("surprise me") raise `AmbiguousQueryError` carrying
+  `.question` (shown to the user) and `.intent` (partial fields) — the chat
+  layer asks a follow-up instead of getting a forced guess.
+- Retries 429/5xx/connection errors with exponential backoff honoring
+  `Retry-After`; permanent 4xx fails fast.
+
+**Run it (no API key needed — demo includes a local OpenAI-compatible mock):**
+
+```bash
+cd backend && ../.venv/Scripts/python scripts/demo_query_understanding.py
+```
+
+Live output for the product-spec query (real pipeline, mock model):
+
+```json
+{
+  "mood": "emotional",
+  "pace": "moderate",
+  "ending_type": "mind-blowing twist",
+  "themes": ["father-daughter relationship", "time"],
+  "themes_exclude": ["space"],
+  "genres_include": ["Science Fiction", "Drama"],
+  "genres_exclude": [],
+  "violence_tolerance": null,
+  "similar_to": ["Interstellar"],
+  "time_period": null,
+  "runtime_max": null,
+  "clarifying_question": null
+}
+```
+
+With a real key, the same call hits your configured `OPENAI_BASE_URL` —
+no code changes.
+
+**Tests (13, incl. the five required scenarios):**
+
+```bash
+cd backend && ../.venv/Scripts/python -m pytest tests/test_query_understanding.py -v
+```
+
+### Modules 5–9 *(pending)*
+
+Explainable recommendations · user taste profile · movie personality vector ·
+conversational orchestration · chat UI, movie cards, explanation panel,
+taste evolution chart.
 
 ## Engineering standards
 
