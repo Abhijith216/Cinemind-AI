@@ -227,7 +227,8 @@ async def _sleep_backoff(attempt: int, retry_after: str | None = None) -> None:
     await asyncio.sleep(_BACKOFF_BASE_SECONDS * (2**attempt) + random.uniform(0, 0.25))
 
 
-def _default_client() -> EmbeddingClient:
+def create_default_client() -> EmbeddingClient:
+    """Build an EmbeddingClient from application settings (shared by services)."""
     settings = get_settings()
     return EmbeddingClient(
         api_key=settings.openai_api_key,
@@ -255,7 +256,7 @@ async def embed_movie(
     owns_client = client is None
     if client is None:
         _require_matching_dimensions()
-        client = _default_client()
+        client = create_default_client()
     try:
         vectors = await client.embed_batch([build_embedding_text(movie)])
     finally:
@@ -301,7 +302,7 @@ async def embed_all_missing_movies(
     started = time.monotonic()
     owns_client = client is None
     if client is None:
-        client = _default_client()
+        client = create_default_client()
     session_factory = sessionmaker or get_sessionmaker()
     exclude_ids: list[Any] = []
 

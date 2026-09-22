@@ -224,11 +224,78 @@ Expected: `interstellar_vs_arrival` well above `interstellar_vs_hangover`
 (text-embedding similarities typically land around 0.4-0.6 for kindred sci-fi
 vs ~0.1-0.25 for unrelated pairs — what matters is the gap).
 
-### Module 3 — Hybrid retrieval *(pending)*
+### ✅ Module 3 — Hybrid retrieval *(done)*
+
+`app/services/retrieval.py` + `POST /api/search/hybrid` (`app/api/search.py`).
+
+Two-stage pipeline:
+1. **SQL candidates** — `1 - (embedding <=> :query)` computed by pgvector
+   (HNSW-indexed), hard filters applied, top **200** candidates.
+2. **Python re-rank** — the full formula over the candidate set:
 
 ```
-score = 0.45*semantic + 0.20*user_history + 0.15*genre
-      + 0.10*ratings + 0.10*popularity
+final_score = 0.45*semantic_similarity   # 1 - cosine_distance (from SQL)
+            + 0.20*user_history_match    # cosine(movie.personality, avg personality of your 8+ ratings)
+            + 0.15*genre_similarity      # Jaccard(query genres, movie genres)
+            + 0.10*normalized_rating     # min-max within the candidate set
+            + 0.10*normalized_popularity # min-max within the candidate set
+```
+
+Every component is returned per movie so you can debug the weighting.
+
+**Try it (needs Postgres + OPENAI_API_KEY; embeddings must be backfilled):**
+
+```bash
+curl -s -X POST http://localhost:8000/api/search/hybrid \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "emotional mind-blowing sci-fi movie",
+    "filters": {"genres": ["Science Fiction"], "min_rating": 7},
+    "limit": 3
+  }' | python -m json.tool
+```
+
+Sample response shape (from a seeded DB):
+
+```json
+{
+  "query": "emotional mind-blowing sci-fi movie",
+  "results": [
+    {
+      "movie": {
+        "id": "6f0e…",
+        "tmdb_id": 157336,
+        "title": "Interstellar",
+        "release_year": 2014,
+        "genres": ["Adventure", "Drama", "Science Fiction"],
+        "personality": {"emotion": 88, "mind_blowing": 95, "darkness": 40,
+          "humor": 25, "violence": 30, "romance": 55, "hopefulness": 70,
+          "plot_complexity": 90, "rewatchability": 80}
+      },
+      "final_score": 0.713,
+      "components": {
+        "semantic_similarity": 0.612,
+        "user_history_match": 0.0,
+        "genre_similarity": 0.333,
+        "normalized_rating": 0.941,
+        "normalized_popularity": 0.780
+      }
+    }
+  ],
+  "applied_weights": {
+    "semantic": 0.45, "history": 0.2, "genre": 0.15,
+    "rating": 0.1, "popularity": 0.1
+  }
+}
+```
+
+`filters` support `genres` (any-of), `languages`, `min_rating`,
+`min/max_release_year`; `user_id` (UUID) turns on the history component.
+
+**Tests (offline, no DB):**
+
+```bash
+cd backend && ../.venv/Scripts/python -m pytest tests -q   # 54 passed
 ```
 
 ### Modules 4–9 *(pending)*
