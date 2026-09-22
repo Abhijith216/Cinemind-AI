@@ -1,0 +1,20 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: cinemind-db
+    environment:
+      POSTGRES_USER: cinemind
+      POSTGRES_PASSWORD: cinemind
+      POSTGRES_DB: cinemind
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cinemind -d cinemind"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
