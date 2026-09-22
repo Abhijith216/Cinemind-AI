@@ -7,6 +7,7 @@ SQL Alembic would emit, so schema regressions fail fast in CI.
 import datetime
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import insert
 from sqlalchemy.dialects import postgresql
 
@@ -97,7 +98,7 @@ def test_movie_personality_jsonb_roundtrip() -> None:
     parsed = MoviePersonalityOut.model_validate(traits)
     assert parsed.mind_blowing == 95
 
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         MoviePersonalityOut.model_validate({**traits, "humor": 101})
 
 

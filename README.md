@@ -98,10 +98,45 @@ curl http://localhost:8000/health                            # 200 (after uvicor
 cd ../frontend && npm run typecheck && npm run build         # TSC OK, build OK
 ```
 
-### Module 1 — Data ingestion (TMDb → Postgres) *(next)*
+### ✅ Module 1 — Data ingestion (TMDb → Postgres) *(done)*
 
-`app/services/ingestion/`: TMDb client, upsert service, resumable CLI.
-Requires `TMDB_API_KEY` in `backend/.env`.
+`app/services/ingestion.py`:
+- `TMDbClient` — typed async wrapper over `/discover/movie`,
+  `/movie/top_rated`, `/movie/{id}`, `/movie/{id}/keywords`; exponential
+  backoff with jitter on 429/5xx (honors `Retry-After`), works with both the
+  v3 `api_key` and a v4 read token (Bearer).
+- `ingest_movies(pages)` — pulls *pages* pages of popular + top-rated,
+  dedupes by TMDb id, fetches full detail + keywords per movie, upserts on
+  `tmdb_id` (never duplicates, safe to re-run), commits per movie (Ctrl-C
+  keeps progress), and skips any single failing movie without killing the
+  run. Returns an `IngestStats` summary.
+- CLI: `python -m app.services.ingestion --pages N`
+
+**Seed the database and verify:**
+
+```bash
+# with the compose Postgres running:
+docker compose up -d db
+cd backend
+DATABASE_URL=postgresql+asyncpg://cinemind:cinemind@localhost:5432/cinemind \
+  ../.venv/Scripts/python -m alembic upgrade head   # once
+
+# put your key in backend/.env (TMDB_API_KEY=...) then:
+DATABASE_URL=postgresql+asyncpg://cinemind:cinemind@localhost:5432/cinemind \
+  ../.venv/Scripts/python -m app.services.ingestion --pages 2
+
+# verify (expected ~380-400 rows: 2 pages × 20 movies × 2 lists, deduped):
+docker compose exec db psql -U cinemind -d cinemind \
+  -c "SELECT count(*) FROM movies;"
+docker compose exec db psql -U cinemind -d cinemind \
+  -c "SELECT tmdb_id, title, release_year, genres FROM movies ORDER BY popularity DESC NULLS LAST LIMIT 5;"
+```
+
+**Test without any network/DB:**
+
+```bash
+cd backend && ../.venv/Scripts/python -m pytest tests -q   # 23 passed
+```
 
 ### ✅ Database schema (designed + migrated)
 
