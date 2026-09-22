@@ -5,9 +5,9 @@ import uuid
 from fastapi import APIRouter
 from sqlalchemy import text
 
-from cinemind import __version__
-from cinemind.core.db import get_sessionmaker
-from cinemind.schemas import HealthOut
+from app import __version__
+from app.core.db import get_sessionmaker
+from app.schemas.common import HealthOut
 
 router = APIRouter(tags=["health"])
 

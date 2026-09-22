@@ -27,5 +27,5 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  health: () => request<HealthResponse>("/api/health"),
+  health: () => request<HealthResponse>("/health"),
 };

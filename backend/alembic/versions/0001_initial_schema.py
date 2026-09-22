@@ -12,7 +12,7 @@ from alembic import op
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 
-from cinemind.core.config import get_settings
+from app.core.config import get_settings
 
 revision: str = "0001"
 down_revision: Union[str, None] = None

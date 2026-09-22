@@ -3,10 +3,10 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = { find = { include = ["cinemind*"] } }
+packages = { find = { include = ["app*"] } }
 
 [project]
-name = "cinemind-backend"
+name = "app"
 version = "0.1.0"
 description = "CineMind — explainable AI movie discovery platform (backend)"
 requires-python = ">=3.11"
@@ -40,6 +40,7 @@ dev = [
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.mypy]
 python_version = "3.11"

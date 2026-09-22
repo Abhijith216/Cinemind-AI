@@ -3,8 +3,7 @@
 **Explainable AI movie discovery.** Describe what you're in the mood for —
 *"something like Interstellar but not about space, emotional, mind-blowing
 ending"* — and CineMind returns ranked recommendations, each with a
-plain-English explanation grounded in the movie's actual attributes (genres,
-keywords, personality traits, ratings) rather than LLM guesswork.
+plain-English explanation grounded in real movie attributes, not LLM vibes.
 
 ## Stack
 
@@ -20,78 +19,94 @@ keywords, personality traits, ratings) rather than LLM guesswork.
 ## Repository layout
 
 ```
-backend/                 FastAPI service (modules 1–8 live here as packages)
-  cinemind/
-    core/                settings (pydantic-settings), DB engine/session
-    db/                  SQLAlchemy models + Alembic migrations
-    api/                 HTTP routers (all endpoints have Pydantic schemas)
-  migrations/            Alembic environment + versions
-  tests/                 pytest suite (runs without Postgres)
-frontend/                Next.js app (module 9)
-docker-compose.yml       Postgres 17 + pgvector
-.env.example             copy to .env and fill in
+frontend/               Next.js app (module 9)
+backend/
+  app/
+    api/                route handlers (all responses via Pydantic schemas)
+    core/               config (pydantic-settings), DB engine/session
+    models/             SQLAlchemy models (movies, personalities, users, ratings, taste)
+    schemas/            Pydantic request/response schemas
+    services/           ingestion, embeddings, retrieval, llm (built in phases)
+    main.py             FastAPI app factory
+  alembic/              migrations (0001 creates pgvector extension + all tables)
+  requirements.txt      runtime deps
+  requirements-dev.txt  test tooling
+  Dockerfile            backend image (runs alembic upgrade head on boot)
+docker-compose.yml      postgres+pgvector, backend, frontend
 ```
 
-## Quickstart
+## Quickstart — one command for the full stack
 
 ```bash
-# 0) One-time setup
-cp .env.example .env                 # then fill in TMDB/LLM keys as needed
+cp backend/.env.example backend/.env   # fill in keys when you need TMDb/LLM features
+docker compose up --build
+```
 
-# 1) Database (requires Docker)
-docker compose up -d                 # Postgres 17 + pgvector on :5432
+That starts:
+- **Postgres 17 + pgvector** on `localhost:5432` (extension pre-enabled image `pgvector/pgvector`)
+- **FastAPI** on `http://localhost:8000` — migrations run automatically on boot
+- **Next.js** on `http://localhost:3000`
 
-# 2) Backend
+### Verify the deliverable
+
+```bash
+curl http://localhost:8000/health
+# {"status":"ok","version":"0.1.0","database":"up"}
+
+# Postgres really is Postgres, with pgvector:
+docker compose exec db psql -U cinemind -d cinemind -c "SELECT extname FROM pg_extension WHERE extname='vector';"
+
+# Stop everything:
+docker compose down
+```
+
+## Local (no Docker) development
+
+```bash
+# Backend
 python -m venv .venv
-.venv/Scripts/pip install -e "backend[local-embeddings]"   # Windows Git Bash
-# macOS/Linux: pip install -e "backend[local-embeddings]"
-.venv/Scripts/python -m alembic upgrade head --app-dir backend
-.venv/Scripts/python -m uvicorn cinemind.main:app --app-dir backend --reload --port 8000
+.venv/Scripts/pip install -r backend/requirements-dev.txt   # Windows Git Bash
+# macOS/Linux: pip install -r backend/requirements-dev.txt
+cd backend && ../.venv/Scripts/python -m alembic upgrade head
+../.venv/Scripts/python -m uvicorn app.main:app --reload --port 8000
 
-# 3) Frontend
+# Frontend
 cd frontend && npm install && npm run dev   # http://localhost:3000
 ```
 
-No Docker yet? Everything below still typechecks and unit-tests without a DB;
-endpoints report `"database": "down"` until Postgres is reachable.
+Without Postgres reachable, `/health` still returns 200 with
+`"database":"down"`, so the API boots anywhere.
 
-## Modules
+## Modules (build order)
 
-### ✅ Phase 0 — Scaffold (done)
+### ✅ Phase 0 — Scaffold + infra (done)
 
-FastAPI app factory with CORS + lifespan-managed engine; strict-typed
-settings; SQLAlchemy 2.0 async models for `movies` (JSONB `raw` + pgvector
-`embedding`), `movie_personality` (9 traits × 0–100), `users`, `ratings`,
-`taste_profiles`; Alembic migration `0001` that enables `pgvector` and creates
-all tables; `/api/health` reporting DB reachability; Next.js 15 + Tailwind v4
-frontend with a placeholder discovery page that pings backend health.
+FastAPI app factory (CORS, lifespan-managed engine), strict-mypy typed code,
+SQLAlchemy 2.0 async models: `movies` (JSONB `raw` + pgvector `embedding`),
+`movie_personality` (9 traits × 0–100), `users`, `ratings`, `taste_profiles`;
+Alembic wired to the container (`env.py` pulls `DATABASE_URL` from settings);
+`GET /health` + `/api/health` alias with graceful DB degradation; Next.js
+placeholder landing page.
 
-**Verify:**
+**Verify without Docker:**
 
 ```bash
-# Backend (no Postgres needed)
-.venv/Scripts/python -m pytest backend/tests -q
-.venv/Scripts/python -m mypy backend/cinemind
-
-# With Docker Postgres running:
-docker compose up -d
-.venv/Scripts/python -m alembic upgrade head --app-dir backend
-.venv/Scripts/python -m uvicorn cinemind.main:app --app-dir backend --port 8000 &
-curl http://localhost:8000/api/health        # {"status":"ok",...,"database":"up"}
-
-# Frontend
-cd frontend && npm run typecheck && npm run build
+cd backend && ../.venv/Scripts/python -m pytest tests -q     # 3 passed
+../.venv/Scripts/python -m mypy app                          # no issues
+../.venv/Scripts/python -m alembic upgrade head --sql        # prints SQL incl. CREATE EXTENSION vector
+curl http://localhost:8000/health                            # 200 (after uvicorn start)
+cd ../frontend && npm run typecheck && npm run build         # TSC OK, build OK
 ```
 
-**Module 1 — Data ingestion (TMDb → Postgres):** planned next. Will add
-`cinemind/ingestion/` with a TMDb client, upsert service, and a CLI entrypoint
-(`python -m cinemind.ingestion --pages 5`), plus README test instructions.
+### Module 1 — Data ingestion (TMDb → Postgres) *(next)*
+
+`app/services/ingestion/`: TMDb client, upsert service, resumable CLI.
+Requires `TMDB_API_KEY` in `backend/.env`.
 
 ### Module 2 — Embedding generation *(pending)*
 
-Synopsis + themes + keywords → `text-embedding-3-large` vector (1536 dims,
-truncated) stored in `movies.embedding`; provider switch via
-`CINEMIND_EMBEDDING_PROVIDER=openai|local`.
+Synopsis + themes + keywords → `text-embedding-3-large` vector stored in
+`movies.embedding` (dimension from `EMBEDDING_DIMENSIONS`).
 
 ### Module 3 — Hybrid retrieval *(pending)*
 
@@ -100,19 +115,19 @@ score = 0.45*semantic + 0.20*user_history + 0.15*genre
       + 0.10*ratings + 0.10*popularity
 ```
 
-### Module 4 — LLM query understanding *(pending)*
-### Module 5 — Explainable recommendation generator *(pending)*
-### Module 6 — User taste profile *(pending)*
-### Module 7 — Movie personality vector *(pending)*
-### Module 8 — Conversational orchestration *(pending)*
-### Module 9 — Frontend (chat UI, movie cards, explanation panel, taste chart) *(pending)*
+### Modules 4–9 *(pending)*
+
+LLM query understanding · explainable recommendations · user taste profile ·
+movie personality vector · conversational orchestration · chat UI, movie
+cards, explanation panel, taste evolution chart.
 
 ## Engineering standards
 
 - **Types everywhere:** TypeScript `strict` (+ `noUncheckedIndexedAccess`);
-  Python type hints with `mypy --strict` clean.
+  Python type hints, `mypy --strict` clean.
 - **Schemas at the boundary:** every endpoint gets Pydantic request/response
-  models (`backend/cinemind/schemas.py` and per-module schemas).
-- **No hardcoded secrets:** everything flows through `.env` +
-  `pydantic-settings` (`cinemind/core/config.py`, prefix `CINEMIND_`).
+  models (`backend/app/schemas/`).
+- **No hardcoded secrets:** all config via env vars + `pydantic-settings`
+  (`DATABASE_URL`, `OPENAI_API_KEY`, `TMDB_API_KEY`, `JWT_SECRET`, ... — see
+  `backend/.env.example`).
 - **Explicit over clever:** plain functions, named weights, docstrings.

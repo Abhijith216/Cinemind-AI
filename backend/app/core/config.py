@@ -1,8 +1,8 @@
 """Application settings, loaded from environment variables.
 
-All settings are prefixed with ``CINEMIND_``. Secrets are never hardcoded:
-copy ``.env.example`` to ``.env`` and fill in real values (backend loads
-``.env`` from the *repo root* and from ``backend/``).
+Plain environment names (``DATABASE_URL``, ``OPENAI_API_KEY``,
+``TMDB_API_KEY``, ``JWT_SECRET``, ...). Secrets are never hardcoded:
+copy ``backend/.env.example`` to ``backend/.env`` and fill in real values.
 """
 
 from functools import lru_cache
@@ -11,11 +11,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Typed application settings (see .env.example for documentation)."""
+    """Typed application settings (see backend/.env.example for documentation)."""
 
     model_config = SettingsConfigDict(
-        env_prefix="CINEMIND_",
-        env_file=(".env", "backend/.env"),
+        env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -23,16 +22,16 @@ class Settings(BaseSettings):
     # --- Database ---
     database_url: str = "postgresql+asyncpg://cinemind:cinemind@localhost:5432/cinemind"
 
+    # --- Auth ---
+    jwt_secret: str = "change-me"
+
     # --- TMDb ---
     tmdb_api_key: str = ""
 
-    # --- LLM (OpenAI-compatible chat completions) ---
-    llm_base_url: str = "https://api.openai.com/v1"
-    llm_api_key: str = ""
+    # --- OpenAI (LLM + embeddings; OpenAI-compatible base URL for local models) ---
+    openai_api_key: str = ""
+    openai_base_url: str = "https://api.openai.com/v1"
     llm_model: str = "gpt-4o-mini"
-
-    # --- Embeddings ---
-    embedding_provider: str = "openai"  # "openai" | "local"
     embedding_model: str = "text-embedding-3-large"
     embedding_dimensions: int = 1536
 

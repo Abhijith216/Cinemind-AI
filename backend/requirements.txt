@@ -1,0 +1,13 @@
+# Runtime dependencies (Python 3.11+). Install with:
+#   pip install -r backend/requirements.txt
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9
+pydantic-settings>=2.6
+sqlalchemy[asyncio]>=2.0.36
+asyncpg>=0.30
+alembic>=1.14
+pgvector>=0.3.6
+greenlet>=3.1
+httpx>=0.28
+openai>=1.57

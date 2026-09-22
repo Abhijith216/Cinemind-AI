@@ -14,7 +14,6 @@ from typing import Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
-    Boolean,
     DateTime,
     Float,
     ForeignKey,
@@ -31,7 +30,7 @@ from sqlalchemy.orm import (
     relationship,
 )
 
-from cinemind.core.config import get_settings
+from app.core.config import get_settings
 
 
 class Base(DeclarativeBase):

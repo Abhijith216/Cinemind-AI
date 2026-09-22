@@ -7,8 +7,8 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from cinemind.core.config import get_settings
-from cinemind.db.models import Base
+from app.core.config import get_settings
+from app.models import Base
 
 config = context.config
 
