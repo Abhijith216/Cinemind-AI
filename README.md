@@ -178,10 +178,51 @@ docker compose exec db psql -U cinemind -d cinemind -c '\di'
 `\d movies` should list the vector column (`vector(1536)`) and the three
 indexes; `\di` shows the GIN/HNSW/unique indexes across all tables.
 
-### Module 2 — Embedding generation *(pending)*
+### ✅ Module 2 — Embedding generation *(done)*
 
-Synopsis + themes + keywords → `text-embedding-3-large` vector stored in
-`movies.embedding` (dimension from `EMBEDDING_DIMENSIONS`).
+`app/services/embeddings.py`:
+- `build_embedding_text(movie)` — keyword-first text blob: `Title / Genres /
+  Themes (keywords+genres, deduped) / Overview (truncated)`. Themes lead the
+  blob so semantic search keys on them, per the product spec.
+- `EmbeddingClient` — OpenAI-compatible `POST /embeddings` with 429/5xx
+  exponential backoff (honors `Retry-After`), input-order restoration, and
+  dimension validation (`text-embedding-3-large` truncated to 1536 via the
+  `dimensions` parameter to match `movies.embedding vector(1536)`).
+- `embed_movie(movie)` / `embed_all_missing_movies()` — batch job that finds
+  `embedding IS NULL` movies, embeds in batches of 100, writes vectors back
+  through pgvector's SQLAlchemy type, and **commits per batch** so a crash
+  mid-run is resumable by simply re-running. Permanently failed batches are
+  excluded for the rest of the run and reported; they stay NULL and retry
+  next run.
+- CLI: `python -m app.services.embeddings --backfill`
+  (`--batch-size`, `--limit N` for smoke tests)
+
+**Run the backfill + verify:**
+
+```bash
+cd backend
+# OPENAI_API_KEY (or compatible provider + OPENAI_BASE_URL) in backend/.env:
+DATABASE_URL=postgresql+asyncpg://cinemind:cinemind@localhost:5432/cinemind \
+  ../.venv/Scripts/python -m app.services.embeddings --backfill
+
+# Deliverable check — should match total movie count:
+docker compose exec db psql -U cinemind -d cinemind \
+  -c "SELECT count(*) FILTER (WHERE embedding IS NOT NULL) AS embedded, count(*) AS total FROM movies;"
+
+# Sanity check: Interstellar vs Arrival should score far higher than a
+# tonally unrelated movie (adjust titles to what you ingested):
+docker compose exec db psql -U cinemind -d cinemind -c "
+SELECT 1 - (a.embedding <=> b.embedding) AS interstellar_vs_arrival,
+       1 - (a.embedding <=> c.embedding) AS interstellar_vs_hangover
+FROM movies a, movies b, movies c
+WHERE a.title = 'Interstellar'
+  AND b.title  = 'Arrival'
+  AND c.title  = 'The Hangover';"
+```
+
+Expected: `interstellar_vs_arrival` well above `interstellar_vs_hangover`
+(text-embedding similarities typically land around 0.4-0.6 for kindred sci-fi
+vs ~0.1-0.25 for unrelated pairs — what matters is the gap).
 
 ### Module 3 — Hybrid retrieval *(pending)*
 
