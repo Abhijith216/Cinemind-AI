@@ -539,6 +539,35 @@ Apply the migration before running against Postgres:
 cd backend && ../.venv/Scripts/python -m alembic upgrade head   # adds 0002 chat tables
 ```
 
+### ✅ Module 9c — Taste-evolution chart + recommendation graph
+
+The two visual "why/taste" views, working against the demo backend's seeded
+user (4 backdated ratings + 4 monthly snapshots):
+
+- **`/taste-evolution`** (`src/app/taste-evolution/page.tsx` +
+  `components/taste-evolution-chart.tsx`) — recharts timeline of the
+  monthly `taste_snapshots`: one line per dominant genre (amber family) and
+  theme (violet family, dashed). A point's value is the tag's **rank** in
+  that month, inverted onto a 0–100 scale (Y axis shows #1…#5), so the
+  chart literally reads "Mostly Action → Thriller → Science Fiction".
+  The user id comes from `?user=` (remembered in localStorage) or a paste
+  box; an amber arc summary line states the first→latest dominant genre.
+- **`/movie/[id]?user=`** (`components/recommendation-graph-view.tsx`) —
+  the recommendation "why" as a **node graph, not a table**: your
+  highest-rated movies on the left, the recommended movie on the right,
+  and bezier edges labeled with the **concrete** genres/keywords they
+  actually share (from `GET /movies/{id}/recommendation-graph`) —
+  Interstellar ★10 —— "Science Fiction, Drama · time" ——> Arrival.
+  Custom SVG (no graph lib), seed nodes link to their own pages.
+- Demo backend seeds the test user `00000000-0000-4000-8000-c1e0deadbeef`
+  and prints ready-made URLs for both views on startup
+  (`/api/demo/urls` has them as JSON).
+
+```bash
+cd backend && ../.venv/Scripts/python scripts/demo_chat_backend.py
+# open the two URLs it prints (taste_evolution, graph)
+```
+
 ### ✅ Module 9b — Chat UI + MovieCard with inline explanations
 
 The first real feature views on the Module 9 shell:

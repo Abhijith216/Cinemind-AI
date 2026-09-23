@@ -1,52 +1,64 @@
-import { ArrowLeft } from "lucide-react";
-import Link from "next/link";
+import { RecommendationGraphView } from "@/components/recommendation-graph-view";
+import { api, type MovieOut, type RecommendationGraph } from "@/lib/api";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
-export default async function MovieDetailPage({
-  params,
-}: {
+interface MoviePageProps {
   params: Promise<{ id: string }>;
-}) {
+  searchParams: Promise<{ user?: string }>;
+}
+
+export default async function MoviePage({ params, searchParams }: MoviePageProps) {
   const { id } = await params;
+  const { user } = await searchParams;
+
+  let movie: MovieOut | null = null;
+  let graph: RecommendationGraph | null = null;
+  let error: string | null = null;
+  try {
+    movie = await api.movies.get(id);
+    graph = await api.movies.recommendationGraph(id, user ?? null);
+  } catch {
+    error = "Could not load this movie. Is the backend running?";
+  }
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-6 py-16">
-      <Link
-        href="/"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-      >
-        <ArrowLeft className="h-4 w-4" /> Back to Discover
-      </Link>
+    <div className="mx-auto w-full max-w-4xl px-4 py-8">
+      {error && <p className="text-sm text-rose-400">{error}</p>}
 
-      <h1 className="mt-6 text-3xl font-bold tracking-tight">Movie</h1>
-      <p className="mt-2 text-muted-foreground">
-        Detail, grounded explanation, and the &ldquo;why&rdquo; graph for one
-        title.
-      </p>
+      {movie && (
+        <>
+          <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h1 className="text-3xl font-semibold tracking-tight">{movie.title}</h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {[movie.release_year, movie.runtime ? `${movie.runtime} min` : null]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+              {movie.overview && (
+                <p className="mt-3 max-w-2xl text-sm leading-relaxed text-foreground/80">
+                  {movie.overview}
+                </p>
+              )}
+            </div>
+            {typeof movie.vote_average === "number" && (
+              <span className="w-fit rounded-full border border-amber-500/40 px-3 py-1 text-sm text-amber-300">
+                ★ {movie.vote_average.toFixed(1)}
+              </span>
+            )}
+          </header>
 
-      <Card className="mt-8 border-dashed bg-card/50">
-        <CardHeader>
-          <CardTitle className="text-lg">Movie detail view lands here</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm text-muted-foreground">
-          <p>
-            Route param:{" "}
-            <code className="rounded bg-secondary px-1.5 py-0.5 text-xs">{id}</code>
-          </p>
-          <p>
-            Will render{" "}
-            <code className="rounded bg-secondary px-1.5 py-0.5 text-xs">
-              api.movies.get()
-            </code>{" "}
-            with the personality radar (nine 0–100 traits) and{" "}
-            <code className="rounded bg-secondary px-1.5 py-0.5 text-xs">
-              api.movies.recommendationGraph()
-            </code>{" "}
-            drawing movie ↔ shared attributes ↔ your rated movies.
-          </p>
-        </CardContent>
-      </Card>
+          <section aria-label="Why this recommendation">
+            <h2 className="mb-1 text-sm font-medium tracking-wide text-muted-foreground uppercase">
+              Why this — grounded in your ratings
+            </h2>
+            <p className="mb-4 text-xs text-muted-foreground">
+              Edges show the genres and themes this movie actually shares with
+              the movies you rated highest.
+            </p>
+            {graph && <RecommendationGraphView graph={graph} />}
+          </section>
+        </>
+      )}
     </div>
   );
 }
