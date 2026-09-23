@@ -402,11 +402,61 @@ reports `OK: ... zero invented attributes`.
 cd backend && ../.venv/Scripts/python -m pytest tests/test_explain.py -v
 ```
 
-### Modules 6–9 *(pending)*
+### ✅ Module 6 — User taste profile *(done)*
 
-User taste profile · movie personality vector · conversational
-orchestration · chat UI, movie cards, explanation panel, taste evolution
-chart.
+`app/services/taste_profile.py` + `app/schemas/taste.py` +
+`app/api/ratings.py`.
+
+- `update_taste_profile(session, user_id, movie, score)` runs after every
+  rating: `score >= 7` merges the movie's genres/keywords into `likes` and
+  its keywords into `favorite_themes`; `score <= 4` merges into `dislikes`;
+  5–6 stores the rating but leaves the profile alone.
+- **Bounded recency = the "light decay":** lists dedupe case-insensitively,
+  newly-touched tags move to the front, capped at `MAX_PROFILE_ITEMS = 50`
+  — no unbounded growth, recent taste always wins.
+- `get_taste_profile(session, user_id)` → `TasteProfileOut` (or `None` for
+  users who never rated).
+- `POST /api/ratings` (201 create / 200 upsert on re-rate) writes the
+  rating **and** updates the profile in the same request; profile update
+  shares the transaction. `GET /api/taste-profile/{user_id}` returns the
+  current profile (404 until the first rating).
+- `snapshot_monthly(session, user_id, month=None)` — the snapshot job you
+  call manually (cron later): ranks the month's dominant genres/themes by
+  **Σ score** per tag (a 10 counts five times a 2; count-then-name
+  tiebreak so the chart is stable) and upserts the `taste_snapshots` row.
+  Rebuild any past month by passing `"2025-12"`; returns `None` for months
+  with no ratings (the chart skips silent months). December rolls over
+  correctly.
+
+**Endpoints:**
+
+```bash
+POST /api/ratings            {"user_id": ..., "movie_id": ..., "score": 1-10}
+GET  /api/taste-profile/{user_id}
+```
+
+**Snapshot job (manual for now):**
+
+```bash
+cd backend
+DATABASE_URL=postgresql+asyncpg://cinemind:cinemind@localhost:5432/cinemind \
+  ../.venv/Scripts/python -m app.services.taste_profile --user-id <uuid> [--month 2026-09]
+```
+
+**Tests (25, all offline — service + endpoint via dependency override):**
+
+```bash
+cd backend && ../.venv/Scripts/python -m pytest tests/test_taste_profile.py -v
+../.venv/Scripts/python scripts/demo_taste_profile.py   # POST + GET shown live
+```
+
+On a real DB the demo's fake session swaps for `get_db_session` — the
+routes are identical.
+
+### Modules 7–9 *(pending)*
+
+Movie personality vector · conversational orchestration · chat UI, movie
+cards, explanation panel, taste evolution chart.
 
 ## Engineering standards
 
