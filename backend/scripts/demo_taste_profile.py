@@ -5,7 +5,7 @@ database session holding one test user and one movie, then shows the two
 deliverable responses:
 
     1. POST /api/ratings      → 201, rating stored, profile updated
-    2. GET  /api/taste-profile/{user_id} → the updated profile
+    2. GET  /api/users/{user_id}/taste-profile → the updated profile
 
 Run from backend/:
 
@@ -117,9 +117,9 @@ def main() -> None:
 
     print()
     print("=" * 72)
-    print(f"GET /api/taste-profile/{user.id}")
+    print(f"GET /api/users/{user.id}/taste-profile")
     print("=" * 72)
-    profile_response = client.get(f"/api/taste-profile/{user.id}")
+    profile_response = client.get(f"/api/users/{user.id}/taste-profile")
     print(f"HTTP {profile_response.status_code}")
     print(profile_response.json())
 

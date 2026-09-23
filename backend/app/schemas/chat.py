@@ -1,5 +1,6 @@
 """Module 8 schemas — multi-turn chat over the recommendation pipeline."""
 
+import datetime
 import uuid
 
 from pydantic import BaseModel, Field
@@ -38,3 +39,23 @@ class ChatTurnResponse(BaseModel):
     asked_clarifying_question: bool
     intent: dict[str, object] | None = None  # resolved intent payload, if any
     results: list[ChatMovieOut] = Field(default_factory=list)
+
+
+class ChatStoredMessage(BaseModel):
+    """One persisted turn (GET /chat/sessions/{id})."""
+
+    id: uuid.UUID
+    role: str
+    content: str
+    intent: dict[str, object] | None = None
+    result_movie_ids: list[str] | None = None
+    created_at: datetime.datetime
+
+
+class ChatSessionOut(BaseModel):
+    """A conversation plus all its stored turns."""
+
+    id: uuid.UUID
+    user_id: uuid.UUID | None
+    created_at: datetime.datetime | None
+    messages: list[ChatStoredMessage] = Field(default_factory=list)

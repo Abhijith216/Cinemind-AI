@@ -24,6 +24,8 @@ class Settings(BaseSettings):
 
     # --- Auth ---
     jwt_secret: str = "change-me"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 60 * 24 * 7  # one week
 
     # --- TMDb ---
     tmdb_api_key: str = ""

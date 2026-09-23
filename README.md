@@ -543,6 +543,48 @@ cd backend && ../.venv/Scripts/python -m alembic upgrade head   # adds 0002 chat
 
 Chat UI, movie cards, explanation panel, taste evolution chart.
 
+### ✅ API surface (Phase 10) — documented FastAPI routers
+
+All public routes live under `/api` (health stays at `/` + `/api/health`)
+with a named Pydantic response model on every route. FastAPI auto-generates
+the docs:
+
+- **Swagger UI:** `http://localhost:8000/docs` · **ReDoc:** `/redoc` ·
+  raw schema: `/openapi.json`
+
+| Method | Route | Response model |
+|---|---|---|
+| POST | `/api/auth/register` | `TokenResponse` (201; 409 duplicate) |
+| POST | `/api/auth/login` | `TokenResponse` (401 on bad credentials) |
+| GET | `/api/movies/{movie_id}` | `MovieOut` |
+| GET | `/api/movies/{movie_id}/recommendation-graph?user_id=` | `RecommendationGraph` |
+| POST | `/api/search/hybrid` | `SearchResponse` |
+| POST | `/api/chat/message` | `ChatTurnResponse` |
+| GET | `/api/chat/sessions/{session_id}` | `ChatSessionOut` |
+| POST | `/api/ratings` | `RatingOut` (201 create / 200 re-rate) |
+| GET | `/api/users/{user_id}/taste-profile` | `TasteProfileOut` |
+| GET | `/api/users/{user_id}/taste-evolution` | `list[TasteSnapshotOut]` |
+| GET | `/health`, `/api/health` | `HealthOut` |
+
+Auth: register/login issue HS256 JWTs (`JWT_SECRET`, 7-day expiry) with
+stdlib PBKDF2-SHA256 password hashing (`pbkdf2_sha256$<iter>$<salt>$<hash>`).
+`JWT_SECRET` must be changed in any real deploy (`backend/.env.example`).
+The recommendation graph returns the structured "why": the movie node, the
+user's top-rated movies, and per-movie edges with concrete shared
+genres/keywords — the same real-overlap discipline as explanations.
+New deps: `pyjwt`, `email-validator` (already in requirements).
+
+The taste profile moved to the canonical `/api/users/{user_id}/taste-profile`
+path (old `/api/taste-profile/{user_id}` removed).
+
+**Verify:**
+
+```bash
+cd backend && ../.venv/Scripts/python -m pytest tests/test_api_surface.py -v
+../.venv/Scripts/python -c "from app.main import app; print(len(app.openapi()['paths']), 'paths documented')"
+# with the server running: open http://localhost:8000/docs
+```
+
 ## Engineering standards
 
 - **Types everywhere:** TypeScript `strict` (+ `noUncheckedIndexedAccess`);

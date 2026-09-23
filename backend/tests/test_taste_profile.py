@@ -363,7 +363,7 @@ def _override(session: FakeSession) -> None:
 def test_ratings_and_profile_routes_are_registered(api: Any) -> None:
     schema = api.get("/openapi.json").json()
     assert "/api/ratings" in schema["paths"]
-    assert "/api/taste-profile/{user_id}" in schema["paths"]
+    assert "/api/users/{user_id}/taste-profile" in schema["paths"]
 
 
 def test_post_rating_creates_rating_and_profile(api: Any) -> None:
@@ -466,14 +466,24 @@ def test_get_taste_profile_round_trip(api: Any) -> None:
     profile = next(obj for obj in session.added if isinstance(obj, UserTasteProfile))
     session.register(profile)
 
-    fetched = api.get(f"/api/taste-profile/{user_id}")
+    fetched = api.get(f"/api/users/{user_id}/taste-profile")
     assert fetched.status_code == 200
     assert "Science Fiction" in fetched.json()["likes"]
     assert fetched.json()["favorite_themes"] == ["first contact", "time"]
 
 
 def test_get_taste_profile_404_without_profile(api: Any) -> None:
-    _override(FakeSession())
-    response = api.get(f"/api/taste-profile/{uuid.uuid4()}")
+    session = FakeSession()
+    _override(session)
+
+    # Unknown user → "user not found".
+    unknown = api.get(f"/api/users/{uuid.uuid4()}/taste-profile")
+    assert unknown.status_code == 404
+    assert "user not found" in unknown.json()["detail"]
+
+    # Registered user who never rated → "rate a movie first".
+    user = User(id=uuid.uuid4(), email="t@t.dev", hashed_password="x")
+    session.register(user)
+    response = api.get(f"/api/users/{user.id}/taste-profile")
     assert response.status_code == 404
     assert "rate a movie first" in response.json()["detail"]

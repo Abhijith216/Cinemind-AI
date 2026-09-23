@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import chat, health, ratings, search
+from app.api import auth, chat, health, movies, ratings, search, users
 from app.core.config import get_settings
 from app.core.db import dispose_engine
 
@@ -19,12 +19,15 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 def create_app() -> FastAPI:
-    """Build the CineMind FastAPI app."""
+    """Build the CineMind FastAPI app with the full documented API surface."""
     settings = get_settings()
     app = FastAPI(
         title="CineMind API",
         version="0.1.0",
-        description="Explainable AI movie discovery platform.",
+        description=(
+            "Explainable AI movie discovery platform. "
+            "Interactive docs: /docs (Swagger UI) and /redoc."
+        ),
         lifespan=lifespan,
     )
     app.add_middleware(
@@ -37,9 +40,13 @@ def create_app() -> FastAPI:
     # Health check at the root path, plus an /api/health alias.
     app.include_router(health.router)
     app.include_router(health.router, prefix="/api")
+    # Versioned API surface.
+    app.include_router(auth.router, prefix="/api")
+    app.include_router(movies.router, prefix="/api")
     app.include_router(search.router, prefix="/api")
-    app.include_router(ratings.router, prefix="/api")
     app.include_router(chat.router, prefix="/api")
+    app.include_router(ratings.router, prefix="/api")
+    app.include_router(users.router, prefix="/api")
     return app
 
 

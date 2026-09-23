@@ -1,4 +1,4 @@
-"""Rating + taste-profile endpoints (Module 6)."""
+"""Rating endpoints (Module 6) — profile reads live under /users/{id}/."""
 
 import datetime
 import logging
@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db_session
 from app.models import Movie, Rating, User
-from app.schemas.taste import RatingCreate, RatingOut, TasteProfileOut
-from app.services.taste_profile import get_taste_profile, update_taste_profile
+from app.schemas.taste import RatingCreate, RatingOut
+from app.services.taste_profile import update_taste_profile
 
 logger = logging.getLogger("app.api.ratings")
 
@@ -80,16 +80,4 @@ async def create_rating(
     )
 
 
-@router.get("/taste-profile/{user_id}", response_model=TasteProfileOut)
-async def read_taste_profile(
-    user_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db_session),
-) -> TasteProfileOut:
-    """Return the user's current likes/dislikes/favorite themes."""
-    profile = await get_taste_profile(db, user_id)
-    if profile is None:
-        raise HTTPException(
-            status_code=404,
-            detail="no taste profile yet — rate a movie first",
-        )
-    return profile
+
