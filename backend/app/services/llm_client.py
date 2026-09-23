@@ -87,6 +87,24 @@ class ChatLLMClient:
             f"Gave up on chat endpoint after {_MAX_RETRIES} attempts: {last_error}"
         )
 
+    async def complete_text(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        history: Sequence[Mapping[str, str]] = (),
+    ) -> str:
+        """Plain-text completion (no JSON mode) for wording-level tasks."""
+        messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        messages.extend(dict(item) for item in history)
+        messages.append({"role": "user", "content": user_prompt})
+
+        body = await self._post_with_retry(
+            {"model": self._model, "messages": messages, "temperature": 0.0}
+        )
+        content: str = body["choices"][0]["message"]["content"]
+        return content
+
     async def complete_json(
         self,
         *,

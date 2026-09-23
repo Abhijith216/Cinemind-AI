@@ -351,11 +351,62 @@ no code changes.
 cd backend && ../.venv/Scripts/python -m pytest tests/test_query_understanding.py -v
 ```
 
-### Modules 5–9 *(pending)*
+### ✅ Module 5 — Explainable recommendations *(done)*
 
-Explainable recommendations · user taste profile · movie personality vector ·
-conversational orchestration · chat UI, movie cards, explanation panel,
-taste evolution chart.
+`app/services/explain.py` + `app/schemas/explanation.py`.
+
+- **Anti-hallucination pipeline, three layers:** (1)
+  `compute_matched_attributes` deterministically extracts the REAL overlaps
+  (query genres ∩ movie genres, requested themes + loved-movie keywords ∩
+  movie keywords, loved-movie genre/keyword overlaps with the 8+ ratings
+  that produced them, personality traits where *both* the movie and the
+  user's loved movies score ≥ 70, intent hints mapped to real trait
+  scores); (2) the LLM prompt embeds ONLY those verified attributes and
+  forbids anything else; (3) the reply passes a token-level grounding
+  check — every content word must come from real data or a known-generic
+  whitelist, and at least one verified match must actually be cited —
+  otherwise the service falls back to a deterministic template.
+- `explain_recommendation(movie, intent, taste)` returns an `Explanation`
+  with BOTH representations the frontend needs: `text` (1-3 sentences for
+  the card view) and `matched_attributes` (structured list for the graph
+  view). `source` reports `"llm"` or `"template"` honestly.
+- `build_user_taste_context(session, user_id)` loads the 8+ rated movies
+  from the DB for taste grounding; `None` for anonymous users.
+- Known trade-off: the grounding check is deliberately conservative — it
+  may reject benign LLM phrasing and use the (always truthful) template.
+
+**Deliverable case** (user rated Interstellar 10/10 + Blade Runner 2049
+9/10; shown Arrival):
+
+```bash
+cd backend && ../.venv/Scripts/python scripts/demo_explain.py
+```
+
+Real pipeline output (`source=llm`, mock model provides wording only):
+
+```
+Arrival is a Science Fiction, Drama film that explores time, sharing
+real ground with Interstellar (10/10) and Blade Runner 2049 (9/10). It
+delivers the emotional, mind blowing tone you asked for.
+```
+
+The demo also feeds a **lying LLM** ("hilarious robot comedy with car
+chases") and shows the fallback: `source=template`, zero invented
+attributes. The final spot-check diffs every token in the accepted
+sentence against Arrival's real TMDb genres/keywords/trait scores — it
+reports `OK: ... zero invented attributes`.
+
+**Tests (16, all offline):**
+
+```bash
+cd backend && ../.venv/Scripts/python -m pytest tests/test_explain.py -v
+```
+
+### Modules 6–9 *(pending)*
+
+User taste profile · movie personality vector · conversational
+orchestration · chat UI, movie cards, explanation panel, taste evolution
+chart.
 
 ## Engineering standards
 
