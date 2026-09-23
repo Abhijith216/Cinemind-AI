@@ -11,7 +11,10 @@ Design notes (agreed schema):
   (user, movie) — re-rating upserts via ON CONFLICT.
 - ``user_taste_profiles`` is 1:1 with users (unique user_id).
 - ``taste_snapshots`` keeps one row per user per month for the taste-evolution
-  chart (unique (user_id, month)).
+chart (unique (user_id, month)).
+- ``chat_sessions``/``chat_messages`` (Module 8) persist multi-turn
+conversations: messages store the resolved intent payload and the
+ordered movie ids shown, so any turn can be replayed or audited.
 
 Indexes: GIN on every JSONB column we filter into, HNSW (cosine) on
 ``movies.embedding`` once the table has data.
@@ -207,3 +210,55 @@ class TasteSnapshot(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="taste_snapshots")
+
+
+class ChatSession(Base):
+    """Module 8: one conversation between a user and CineMind."""
+
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    messages: Mapped[list["ChatMessage"]] = relationship(
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="ChatMessage.created_at",
+    )
+
+
+class ChatMessage(Base):
+    """One turn (user or assistant) inside a chat session.
+
+    Assistant turns optionally carry the resolved ``intent`` payload and the
+    ordered ``result_movie_ids`` that were shown, so results are auditable
+    and the Phase 14 UI can re-render a past turn.
+    """
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"), index=True
+    )
+    role: Mapped[str] = mapped_column(String(16))  # "user" | "assistant"
+    content: Mapped[str] = mapped_column(Text)
+    intent: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    result_movie_ids: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    session: Mapped[ChatSession] = relationship(back_populates="messages")

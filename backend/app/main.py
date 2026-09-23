@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import health, ratings, search
+from app.api import chat, health, ratings, search
 from app.core.config import get_settings
 from app.core.db import dispose_engine
 
@@ -39,6 +39,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix="/api")
     app.include_router(search.router, prefix="/api")
     app.include_router(ratings.router, prefix="/api")
+    app.include_router(chat.router, prefix="/api")
     return app
 
 

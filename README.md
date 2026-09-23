@@ -496,10 +496,52 @@ Output: 20/20 scored, three sample vectors (comedy → humor 88 / darkness
 cd backend && ../.venv/Scripts/python -m pytest tests/test_personality.py -v
 ```
 
-### Modules 8–9 *(pending)*
+### ✅ Module 8 — Conversational orchestration *(done)*
 
-Conversational orchestration · chat UI, movie cards, explanation panel,
-taste evolution chart.
+`app/services/chat_orchestrator.py` + `app/api/chat.py` +
+`app/schemas/chat.py`; persistence in `chat_sessions`/`chat_messages`
+(migration `0002_chat_tables.py`).
+
+- `POST /api/chat/message` `{message, session_id?, user_id?, result_limit?}`:
+  loads the session history → `parse_query` **with that history** → if the
+  model asks a clarifying question it IS the reply (no search) → otherwise
+  renders the resolved intent, embeds it, runs hybrid search, generates
+  grounded explanations, and returns ranked + explained results with a
+  short summary reply. Every turn (user + assistant) is persisted; the
+  assistant turn stores the resolved intent payload and the ordered result
+  movie ids.
+- Multi-turn refinement works because the **intent is re-rendered and
+  re-embedded each turn**: "think" after "surprise me" produces a
+  mind-bending query even though those words never appeared in turn 1.
+  Decade intents ("1990s") and "recent" map onto SQL year filters.
+- Unknown `session_id` → 404. Anonymous users are allowed (no taste
+  grounding).
+
+**Demo — the product-spec flow, full transcript:**
+
+```bash
+cd backend && ../.venv/Scripts/python scripts/demo_chat.py
+```
+
+Turns: "surprise me" → clarifying question · "think" → second question ·
+"about two hours" → 4 ranked picks with per-movie explanations and matched
+attributes · persistence of 1 session + 8 messages.
+
+**Tests (10, offline — includes the required flow as an explicit case):**
+
+```bash
+cd backend && ../.venv/Scripts/python -m pytest tests/test_chat_orchestrator.py -v
+```
+
+Apply the migration before running against Postgres:
+
+```bash
+cd backend && ../.venv/Scripts/python -m alembic upgrade head   # adds 0002 chat tables
+```
+
+### Module 9 *(pending)*
+
+Chat UI, movie cards, explanation panel, taste evolution chart.
 
 ## Engineering standards
 
