@@ -1,40 +1,49 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { Clapperboard, Compass, MessageSquareText } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import type { HealthResponse } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { api, type HealthResponse } from "@/lib/api";
 
 const SUGGESTIONS = [
-  "Something like Interstellar but not about space, emotional, mind-blowing ending",
+  "Something like Interstellar but not about space",
   "A cozy comfort movie with witty dialogue",
-  "A mind-bending thriller that stays with you",
+  "Mind-bending, emotional, under two hours",
 ];
 
-export default function HomePage() {
+export default function DiscoverPage() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
 
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"}/health`)
-      .then((r) => (r.ok ? r.json() : null))
+    api
+      .health()
       .then(setHealth)
       .catch(() => setHealth(null));
   }, []);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col items-center justify-center gap-8 px-6 py-16">
+    <div className="mx-auto w-full max-w-3xl px-6 py-16">
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
         className="text-center"
       >
-        <h1 className="bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-5xl font-bold tracking-tight text-transparent">
-          CineMind
+        <Badge variant="accent" className="mb-4">
+          <Clapperboard className="mr-1.5 h-3 w-3" /> now screening
+        </Badge>
+        <h1 className="bg-gradient-to-r from-marquee via-primary to-neon bg-clip-text text-5xl font-bold tracking-tight text-transparent">
+          Describe the mood.
         </h1>
-        <p className="mt-3 text-muted-foreground">
-          Describe the mood. Get recommendations — with the &ldquo;why&rdquo;
-          spelled out.
+        <p className="mt-3 text-lg text-muted-foreground">
+          CineMind finds the movie — and spells out exactly{" "}
+          <span className="text-primary">why</span> each pick fits.
         </p>
       </motion.div>
 
@@ -42,48 +51,84 @@ export default function HomePage() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay: 0.15 }}
-        className="w-full rounded-2xl border border-border bg-card p-5 shadow-lg"
+        className="mt-10"
       >
-        <div className="flex flex-wrap gap-2">
-          {SUGGESTIONS.map((s) => (
-            <span
-              key={s}
-              className="cursor-default rounded-full border border-border bg-secondary px-3 py-1 text-sm text-secondary-foreground/80"
-            >
-              {s}
-            </span>
-          ))}
-        </div>
-        <div className="mt-4 flex gap-2">
-          <input
-            className="h-11 flex-1 rounded-xl border border-input bg-background px-4 text-sm outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring"
-            placeholder="Describe what you feel like watching…"
-            aria-label="Movie request"
-          />
-          <button
-            className="h-11 rounded-xl bg-primary px-5 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-            disabled
-          >
-            Find movies
-          </button>
-        </div>
+        <Card className="border-border/80 bg-card/80 shadow-[0_0_40px_hsl(var(--glow)/0.08)] backdrop-blur-sm">
+          <CardContent className="p-5">
+            <div className="flex flex-wrap gap-2">
+              {SUGGESTIONS.map((suggestion) => (
+                <Badge key={suggestion} variant="outline" className="normal-case">
+                  {suggestion}
+                </Badge>
+              ))}
+            </div>
+            <div className="mt-4 flex gap-2">
+              <Input
+                placeholder="Describe what you feel like watching…"
+                aria-label="Movie request"
+              />
+              <Button disabled>Find movies</Button>
+            </div>
+          </CardContent>
+        </Card>
       </motion.div>
 
-      <p className="text-xs text-muted-foreground">
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.3 }}
+        className="mt-12 grid gap-4 sm:grid-cols-2"
+      >
+        <Card className="bg-card/60">
+          <CardContent className="flex items-start gap-3 p-5">
+            <MessageSquareText className="mt-0.5 h-5 w-5 text-neon" />
+            <div>
+              <p className="text-sm font-medium">Prefer a conversation?</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Chat, refine, and narrow it down turn by turn.
+              </p>
+              <Link
+                href="/chat"
+                className="mt-2 inline-block text-sm text-primary underline-offset-4 hover:underline"
+              >
+                Open the chat →
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-card/60">
+          <CardContent className="flex items-start gap-3 p-5">
+            <Compass className="mt-0.5 h-5 w-5 text-neon" />
+            <div>
+              <p className="text-sm font-medium">Your taste, mapped.</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Ratings build a profile — and a chart of how it evolves.
+              </p>
+              <Link
+                href="/profile"
+                className="mt-2 inline-block text-sm text-primary underline-offset-4 hover:underline"
+              >
+                See My Taste →
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      <p className="mt-12 text-center text-xs text-muted-foreground">
         Backend:{" "}
         {health ? (
-          <span className={health.database === "up" ? "text-emerald-400" : "text-amber-400"}>
+          <span
+            className={
+              health.database === "up" ? "text-emerald-400" : "text-amber-400"
+            }
+          >
             {health.status} · v{health.version} · db {health.database}
           </span>
         ) : (
-          <span className="text-muted-foreground">offline (start the FastAPI server)</span>
+          <span>offline (start the FastAPI server)</span>
         )}
       </p>
-
-      <p className="text-center text-sm text-muted-foreground">
-        Chat UI, movie cards, explanation panel, and taste evolution chart land
-        in module 9. This page verifies the scaffold end-to-end.
-      </p>
-    </main>
+    </div>
   );
 }
