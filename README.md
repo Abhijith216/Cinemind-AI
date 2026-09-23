@@ -453,10 +453,53 @@ cd backend && ../.venv/Scripts/python -m pytest tests/test_taste_profile.py -v
 On a real DB the demo's fake session swaps for `get_db_session` — the
 routes are identical.
 
-### Modules 7–9 *(pending)*
+### ✅ Module 7 — Movie personality vectors *(done)*
 
-Movie personality vector · conversational orchestration · chat UI, movie
-cards, explanation panel, taste evolution chart.
+`app/services/personality.py`.
+
+- `analyze_personality(movie)` → `{trait: 0-100 int}` for the nine traits.
+  ONE LLM call per movie (JSON mode via the shared `ChatLLMClient`, with
+  the one-shot self-repair on schema failure); the prompt instructs the
+  model to **reason silently and reply with only the JSON object** — no
+  reasoning ever reaches the response. The reply is validated by
+  `MoviePersonalityOut` (int 0-100 per trait), and the backfill
+  re-validates at the DB boundary.
+- `backfill_personality()` — same resumable design as the embeddings
+  backfill: `personality IS NULL` candidates in stable id order, commit
+  per batch, single-movie failures isolated (the rest of the batch still
+  scores), failed movies stay NULL and are retried next run, `--limit`
+  honored exactly.
+- CLI: `python -m app.services.personality --backfill [--batch-size N]
+  [--limit N]`.
+
+**Run it (needs OPENAI_API_KEY + DB):**
+
+```bash
+cd backend
+DATABASE_URL=postgresql+asyncpg://cinemind:cinemind@localhost:5432/cinemind \
+  ../.venv/Scripts/python -m app.services.personality --backfill
+```
+
+**Demo without keys (20-movie batch, mock model, sanity checks):**
+
+```bash
+cd backend && ../.venv/Scripts/python scripts/demo_personality.py
+```
+
+Output: 20/20 scored, three sample vectors (comedy → humor 88 / darkness
+18 / violence 12; mind-bending sci-fi → mind_blowing 85 / plot_complexity
+78; grim thriller → darkness 82 / humor 8) and PASS on all sanity checks.
+
+**Tests (14, offline):**
+
+```bash
+cd backend && ../.venv/Scripts/python -m pytest tests/test_personality.py -v
+```
+
+### Modules 8–9 *(pending)*
+
+Conversational orchestration · chat UI, movie cards, explanation panel,
+taste evolution chart.
 
 ## Engineering standards
 
