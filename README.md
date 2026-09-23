@@ -539,9 +539,64 @@ Apply the migration before running against Postgres:
 cd backend && ../.venv/Scripts/python -m alembic upgrade head   # adds 0002 chat tables
 ```
 
-### Module 9 *(pending)*
+### ✅ Module 9b — Chat UI + MovieCard with inline explanations
 
-Chat UI, movie cards, explanation panel, taste evolution chart.
+The first real feature views on the Module 9 shell:
+
+- **`MovieCard`** (`src/components/movie-card.tsx`) — poster (TMDb CDN
+  `w500` or a themed fallback), title, year, ★-rating badge, and the
+  **explanation sentence shown directly on the card** (the Phase 5/7
+  differentiator). A "Why this?" expand reveals the structured matches as
+  color-coded chips: Genres / Themes / Personality / Intent / Your
+  favorites. `MovieCardRow` renders them as a horizontal scroll strip.
+- **`/chat`** (`src/app/chat/page.tsx`) — full transcript (amber user /
+  card-surface assistant bubbles), typing indicator, and **quick-reply
+  chips** for clarifying turns (derived from the reply text / echoed intent
+  themes when the backend has no explicit suggestions). The session id is
+  kept in `sessionStorage`, so a reload continues the same conversation;
+  recommendations from a search turn render as a `MovieCardRow` under the
+  assistant message. (The backend returns complete turns per POST, so the
+  UI shows an honest typing indicator rather than fake token streaming.)
+- **E2E run without real services:** `backend/scripts/demo_chat_backend.py`
+  serves the real FastAPI pipeline on `:8000` (mock OpenAI-compatible LLM +
+  embeddings server, SQL-dispatching fake Postgres session — same seams as
+  `scripts/demo_chat.py`). CORS already defaults to `localhost:3000`.
+
+```bash
+# terminal 1
+cd backend && ../.venv/Scripts/python scripts/demo_chat_backend.py
+# terminal 2
+cd frontend && npm run dev            # http://localhost:3000/chat
+# then type: surprise me -> mind-bending thriller -> about two hours
+# -> 4 ranked cards, each with its grounded explanation + "Why this?" chips
+```
+
+### ✅ Module 9 — Frontend shell
+
+`frontend/` — Next.js 15 App Router + TypeScript strict + Tailwind v4.
+
+- **Routes:** `/` (Discover), `/chat`, `/movie/[id]`, `/profile`,
+  `/taste-evolution` — themed placeholder pages behind a working global nav
+  (Discover / Chat / My Taste) with active-state highlight.
+- **Cinematic theme:** deep-charcoal "darkened theater" palette, projector-beam
+  amber primary, violet neon accent, golden `beam` light + film-grain overlay
+  (`globals.css`), shadcn/ui-style primitives in `src/components/ui`
+  (button/card/badge/input, `components.json` ready for the CLI).
+- **Typed API client** (`src/lib/api.ts`): one interface per backend Pydantic
+  response model (Phase 10 surface — auth, movies, graph, search, chat,
+  ratings, taste), `ApiError` with status + detail, bearer-token helper for
+  register/login, base URL from `NEXT_PUBLIC_API_BASE_URL`.
+
+**Verify:**
+
+```bash
+cd frontend && npm run dev        # http://localhost:3100
+cd frontend && npm run typecheck && npm run build
+```
+
+The explanation panel, movie detail page, and the taste evolution chart are
+the next frontend increments — the client methods for all of them already
+exist.
 
 ### ✅ API surface (Phase 10) — documented FastAPI routers
 
