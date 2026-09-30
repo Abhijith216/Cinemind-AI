@@ -46,5 +46,9 @@ class HealthOut(BaseModel):
     status: str
     version: str
     database: str
+    # Populated when the DB probe fails — actionable, non-secret detail
+    # (exception type + first line, e.g. "asyncpg exceptions:
+    # password authentication failed").
+    database_error: str | None = None
     uptime_seconds: float | None = None
     timestamp: str | None = None
