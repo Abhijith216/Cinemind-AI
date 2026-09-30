@@ -23,10 +23,10 @@ services:
     plan: free
     healthCheckPath: /health
     autoDeploy: true
-    preDeploy:
-      # One command per deploy: create/update the schema (idempotent).
-      # Uses DATABASE_URL_DIRECT — Neon's pooled endpoint can reject DDL.
-      command: sh -c "alembic upgrade head"
+    # NOTE: Docker-runtime services don't support a blueprint preDeploy hook.
+    # Migrations instead run in the container entrypoint (backend/start.sh)
+    # on every boot — idempotent, and it uses DATABASE_URL_DIRECT (Neon's
+    # pooled endpoint can reject DDL).
     envVars:
       - key: DATABASE_URL
         sync: false        # Neon POOLED url (pc-...-pooler...neon.tech/...)

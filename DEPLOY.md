@@ -39,7 +39,8 @@ Render                          Neon (external)
 ```
 
 - The blueprint in [render.yaml](render.yaml) defines both services.
-- Migrations run automatically on every backend deploy (`preDeploy`).
+- Migrations run automatically on every backend boot (the container
+  entrypoint runs `alembic upgrade head` before starting uvicorn).
 - The backend health check (`/health`) drives Render's monitoring and
   restarts the service if it stops answering.
 
@@ -74,9 +75,9 @@ Render                          Neon (external)
    - `CORS_ORIGINS` — leave `https://cinemind-web.onrender.com` for now
      (fix up in step 4 once you know your real frontend URL)
    - `NEXT_PUBLIC_API_BASE_URL` — leave blank for now (step 4)
-3. First deploy takes ~5 min (Docker builds). The backend's `preDeploy`
-   runs `alembic upgrade head` — the schema (with pgvector) is created
-   before the API ever boots.
+3. First deploy takes ~5 min (Docker builds). The backend container runs
+   `alembic upgrade head` on boot — the schema (with pgvector) is created
+   before the API accepts traffic.
 
 ---
 
@@ -220,8 +221,9 @@ Full list with local defaults: [backend/.env.example](backend/.env.example),
 ## 9. Redeploys & updates
 
 - **Auto-deploy**: every push to the connected branch re-builds both images
-  and runs migrations first (preDeploy). If migrations fail, the deploy
-  halts — the running version keeps serving.
+  and runs migrations first (container entrypoint). If migrations fail,
+  the container exits and the deploy is marked unhealthy — the running
+  version keeps serving until the new one passes its health check.
 - **Manual**: Render dashboard → **Manual Deploy → Deploy latest commit**.
 - **Rollback**: service → **Events** → a previous deploy → **Rollback**.
 - **Schema changes**: generate locally with
@@ -234,7 +236,7 @@ Full list with local defaults: [backend/.env.example](backend/.env.example),
 
 | Symptom | Cause / fix |
 | --- | --- |
-| Backend deploys fail at `preDeploy` | Wrong/empty `DATABASE_URL_DIRECT`, or you pasted the **pooled** URL there — Neon's PgBouncer rejects some DDL. Use the direct URL. |
+| Backend container exits during boot (migration errors in logs) | Wrong/empty `DATABASE_URL_DIRECT`, or you pasted the **pooled** URL there — Neon's PgBouncer rejects some DDL. Use the direct URL. |
 | `password authentication failed` | Copied the Neon URL with the placeholder password, or the role/branch mismatch — copy fresh from Neon's dashboard. |
 | Backend boots, `/health` shows `database: "down"` | `DB_SSL` not `require` (Neon closes plaintext connections) or a typo in the host. |
 | Frontend loads, all API calls fail | `NEXT_PUBLIC_API_BASE_URL` not set or missing `https://`, or `CORS_ORIGINS` doesn't exactly match the frontend URL (scheme + host + port). Rebuild the frontend after changing either. |

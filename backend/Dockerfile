@@ -27,11 +27,13 @@ COPY --from=build /opt/venv /opt/venv
 COPY --chown=cinemind:cinemind app ./app
 COPY --chown=cinemind:cinemind alembic ./alembic
 COPY --chown=cinemind:cinemind alembic.ini ./
+COPY --chown=cinemind:cinemind start.sh ./start.sh
+RUN chmod +x start.sh
 USER cinemind
 EXPOSE 8000
-# Migrations run via Render's preDeploy command (or manually); the container
-# just serves. PORT is injected by Render; docker-compose-style local runs
-# default to 8000.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --workers ${WEB_CONCURRENCY:-1}"]
+# Render Docker services have no blueprint preDeploy hook, so migrations run
+# in the entrypoint on every boot (idempotent; safe across restarts and
+# workers). PORT is injected by Render; local runs default to 8000.
+CMD ["./start.sh"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -fsS http://127.0.0.1:${PORT:-8000}/health || exit 1
