@@ -16,6 +16,10 @@ export function setAuthToken(token: string | null): void {
   authToken = token;
 }
 
+/** Backend calls bail out after this long (LLM turns are slow; a dead
+ * backend should still fail fast instead of hanging the UI). */
+const REQUEST_TIMEOUT_MS = 45_000;
+
 export class ApiError extends Error {
   readonly status: number;
 
@@ -32,7 +36,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   };
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
   if (!response.ok) {
     let detail = `API error ${response.status}`;
     try {
@@ -251,6 +259,7 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ email, password }),
       }),
+    me: () => request<UserOut>("/api/auth/me"),
   },
 
   movies: {

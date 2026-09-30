@@ -1,6 +1,5 @@
 """Health endpoint and app metadata."""
 
-import uuid
 
 from fastapi import APIRouter
 from sqlalchemy import text

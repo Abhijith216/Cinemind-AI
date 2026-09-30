@@ -2,10 +2,11 @@
 
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db_session
+from app.core.rate_limit import search_rate_limit
 from app.schemas.common import MovieOut
 from app.schemas.retrieval import (
     ComponentScores,
@@ -13,6 +14,7 @@ from app.schemas.retrieval import (
     SearchRequest,
     SearchResponse,
 )
+from app.services.embeddings import EmbeddingError
 from app.services.retrieval import (
     WEIGHT_GENRE,
     WEIGHT_HISTORY,
@@ -31,6 +33,7 @@ router = APIRouter(tags=["search"])
 @router.post("/search/hybrid", response_model=SearchResponse)
 async def search_hybrid(
     request: SearchRequest,
+    _rate_limit: search_rate_limit,
     db: AsyncSession = Depends(get_db_session),
 ) -> SearchResponse:
     """Embed the raw text query, run hybrid retrieval, return ranked movies.
@@ -39,7 +42,14 @@ async def search_hybrid(
     debugged directly from the response.
     """
     logger.info("hybrid search: %r (user=%s)", request.query[:80], request.user_id)
-    query_embedding = await embed_query(request.query)
+    try:
+        query_embedding = await embed_query(request.query)
+    except EmbeddingError as exc:
+        logger.warning("embedding unavailable for search: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Search is temporarily unavailable — the embedding service did not respond.",
+        ) from exc
     ranked = await hybrid_search(
         session=db,
         query_embedding=query_embedding,

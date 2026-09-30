@@ -21,6 +21,11 @@ interface ChatEntry {
   /** Quick replies for the NEXT user turn (clarifying questions). */
   suggestions?: string[];
   movies?: MovieCardData[];
+  /** This assistant bubble is a failure — offer a retry of retryText. */
+  failed?: boolean;
+  retryText?: string;
+  /** Search ran but returned nothing (not a clarifying turn). */
+  noResults?: boolean;
 }
 
 const OPENING: ChatEntry = {
@@ -95,6 +100,32 @@ function quickRepliesFor(turn: ChatTurnResponse): string[] {
   return quoted.filter((s) => s.length > 0).slice(0, 3);
 }
 
+/**
+ * One honest, actionable message per failure mode — LLM slowness, rate
+ * limits, and a dead backend read differently, and none of them crash.
+ */
+function describeChatError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 429) {
+      return "You're sending messages faster than our API budget allows. Give it about a minute, then try again.";
+    }
+    if (error.status === 503 || error.status === 502 || error.status === 504) {
+      return "CineMind's language model is briefly unavailable. Your message is safe — try again in a moment.";
+    }
+    if (error.status === 404) {
+      return "This conversation expired on the server. Send any message to start a fresh one.";
+    }
+    return `Something went wrong (${error.status}). ${error.message}`;
+  }
+  if (
+    error instanceof DOMException &&
+    (error.name === "TimeoutError" || error.name === "AbortError")
+  ) {
+    return "That took too long — deep dives can be slow, but this timed out. Try rephrasing, or send it again.";
+  }
+  return "I can't reach the movie brain right now. Check that the backend is running on :8000, then retry.";
+}
+
 export default function ChatPage() {
   const [entries, setEntries] = useState<ChatEntry[]>([OPENING]);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -136,11 +167,15 @@ export default function ChatPage() {
       }
       setEntries((prev) => {
         const next = [...prev];
+        const isClarifying =
+          turn.results.length === 0 && turn.asked_clarifying_question;
         next[next.length - 1] = {
           role: "assistant",
           text: turn.reply,
-          suggestions: turn.results.length === 0 ? quickRepliesFor(turn) : [],
+          suggestions: isClarifying ? quickRepliesFor(turn) : [],
           movies: turn.results.map(rankedToCard),
+          // A searched turn that found nothing is its own honest state.
+          noResults: turn.results.length === 0 && !isClarifying,
         };
         return next;
       });
@@ -149,10 +184,9 @@ export default function ChatPage() {
         const next = [...prev];
         next[next.length - 1] = {
           role: "assistant",
-          text:
-            err instanceof ApiError
-              ? `Something went wrong (${err.status}). ${err.message}`
-              : "Something went wrong. Please try again.",
+          text: describeChatError(err),
+          failed: true,
+          retryText: trimmed,
           suggestions: [],
           movies: [],
         };
@@ -181,7 +215,36 @@ export default function ChatPage() {
       <div className="flex-1 space-y-4 overflow-y-auto rounded-lg border border-border/60 bg-card/30 p-4">
         {entries.map((entry, index) => (
           <div key={index} className="space-y-2">
-            <div className={cnBubble(entry.role)}>{entry.text}</div>
+            <div
+              className={cn(
+                cnBubble(entry.role),
+                entry.failed && "border-rose-500/30 text-rose-200",
+              )}
+            >
+              {entry.text}
+            </div>
+
+            {/* Retry affordance on failed turns (latest only). */}
+            {entry.failed && index === last && entry.retryText && (
+              <div className="mr-auto">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void send(entry.retryText ?? "")}
+                  disabled={pending}
+                >
+                  Try again
+                </Button>
+              </div>
+            )}
+
+            {/* Honest empty state: the search ran and found nothing. */}
+            {entry.role === "assistant" && entry.noResults && (
+              <p className="mr-auto rounded-lg border border-dashed border-border/60 px-4 py-3 text-sm text-muted-foreground">
+                Nothing in the catalog matched that. Try broadening the mood or
+                dropping a filter.
+              </p>
+            )}
 
             {/* Recommendations from a search turn render under the reply. */}
             {entry.role === "assistant" && entry.movies && entry.movies.length > 0 && (

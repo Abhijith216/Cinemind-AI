@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { AuthProvider } from "@/components/auth-provider";
 import { SiteNav } from "@/components/site-nav";
 import "./globals.css";
 
@@ -17,8 +18,10 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className="beam grain min-h-screen antialiased">
         <div className="relative z-10 flex min-h-screen flex-col">
-          <SiteNav />
-          <main className="flex-1">{children}</main>
+          <AuthProvider>
+            <SiteNav />
+            <main className="flex-1">{children}</main>
+          </AuthProvider>
           <footer className="border-t border-border/60 py-6 text-center text-xs text-muted-foreground">
             CineMind — every pick comes with its reasons. ·{" "}
             <Link

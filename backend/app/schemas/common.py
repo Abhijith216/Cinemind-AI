@@ -1,9 +1,8 @@
 """Movie + user Pydantic schemas (shared request/response contracts)."""
 
-import datetime
 import uuid
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class MoviePersonalityOut(BaseModel):

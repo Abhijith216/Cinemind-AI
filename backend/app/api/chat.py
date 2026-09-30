@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db_session
+from app.core.rate_limit import chat_rate_limit
 from app.models import ChatMessage, ChatSession
 from app.schemas.chat import (
     ChatMessageRequest,
@@ -17,6 +18,7 @@ from app.schemas.chat import (
 )
 from app.services.chat_orchestrator import handle_chat_message
 from app.services.explain import explain_recommendation
+from app.services.llm_client import LLMError
 from app.services.query_understanding import parse_query
 from app.services.retrieval import embed_query, hybrid_search
 
@@ -28,6 +30,7 @@ router = APIRouter(tags=["chat"])
 @router.post("/chat/message", response_model=ChatTurnResponse)
 async def post_chat_message(
     payload: ChatMessageRequest,
+    _rate_limit: chat_rate_limit,
     db: AsyncSession = Depends(get_db_session),
 ) -> ChatTurnResponse:
     """One conversational turn: intent → (clarification | search + explain).
@@ -49,6 +52,14 @@ async def post_chat_message(
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LLMError as exc:
+        # Ambiguous-query is a normal turn (handled inside the orchestrator);
+        # reaching this handler means the LLM provider itself failed.
+        logger.warning("chat turn failed on LLM provider: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Chat is temporarily unavailable — the language model did not respond.",
+        ) from exc
 
 
 @router.get("/chat/sessions/{session_id}", response_model=ChatSessionOut)

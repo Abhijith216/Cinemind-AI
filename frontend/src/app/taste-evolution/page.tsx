@@ -1,12 +1,14 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import { Film, Loader2 } from "lucide-react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
+import { useAuth } from "@/components/auth-provider";
+import { RequireAuth } from "@/components/require-auth";
 import { TasteEvolutionChart } from "@/components/taste-evolution-chart";
 import { api, ApiError, type TasteSnapshotOut } from "@/lib/api";
-
-const USER_STORAGE_KEY = "cinemind.user_id";
 
 function arcSummary(snapshots: TasteSnapshotOut[]): string {
   if (snapshots.length === 0) return "";
@@ -20,23 +22,13 @@ function arcSummary(snapshots: TasteSnapshotOut[]): string {
 }
 
 function TasteEvolutionContent() {
+  const { user } = useAuth();
   const searchParams = useSearchParams();
-  const userParam = searchParams.get("user");
-  const [userId, setUserId] = useState<string | null>(null);
+  // ?user= wins (demo/inspection); otherwise the signed-in user's id.
+  const userId = searchParams.get("user") ?? user?.id ?? null;
+
   const [snapshots, setSnapshots] = useState<TasteSnapshotOut[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
-
-  // Resolve the user: ?user= param wins, else the remembered demo user.
-  useEffect(() => {
-    if (userParam) {
-      window.localStorage.setItem(USER_STORAGE_KEY, userParam);
-      setUserId(userParam);
-      return;
-    }
-    const saved = window.localStorage.getItem(USER_STORAGE_KEY);
-    if (saved) setUserId(saved);
-  }, [userParam]);
 
   useEffect(() => {
     if (!userId) return;
@@ -53,7 +45,7 @@ function TasteEvolutionContent() {
           setError(
             err instanceof ApiError
               ? `${err.status}: ${err.message}`
-              : "Failed to load taste evolution.",
+              : "Couldn't reach the backend. Is it running on :8000?",
           );
         }
       });
@@ -74,51 +66,54 @@ function TasteEvolutionContent() {
         )}
       </header>
 
-      {!userId && (
-        <form
-          className="mb-6 flex max-w-md gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (draft.trim().length === 0) return;
-            window.localStorage.setItem(USER_STORAGE_KEY, draft.trim());
-            setUserId(draft.trim());
-          }}
-        >
-          <input
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="Paste a user id (demo backend prints one)"
-            className="flex-1 rounded-md border border-border bg-card px-3 py-2 text-sm"
-            aria-label="User id"
-          />
-          <button
-            type="submit"
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-          >
-            Load
-          </button>
-        </form>
-      )}
-
       {error && (
         <p className="text-sm text-rose-400" role="alert">
           {error}
         </p>
       )}
 
-      {snapshots === null && !error && userId && (
-        <p className="text-sm text-muted-foreground">Loading your taste timeline…</p>
+      {snapshots === null && !error && (
+        <div
+          className="flex items-center justify-center gap-2 py-24 text-sm text-muted-foreground"
+          role="status"
+        >
+          <Loader2 className="size-4 animate-spin" />
+          Loading your taste timeline…
+        </div>
       )}
 
-      {snapshots && <TasteEvolutionChart snapshots={snapshots} />}
+      {/* New-user empty state: real backend response of [], not an error. */}
+      {snapshots !== null && snapshots.length === 0 && (
+        <div className="rounded-lg border border-dashed border-border/60 bg-card/40 p-10 text-center">
+          <Film className="mx-auto mb-3 h-8 w-8 text-primary/70" />
+          <p className="font-medium">Your timeline starts with your first ratings</p>
+          <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+            Each month, CineMind snapshots the genres and themes you rated
+            highest. Rate a few movies in{" "}
+            <Link
+              href="/chat"
+              className="text-primary underline-offset-4 hover:underline"
+            >
+              Chat
+            </Link>{" "}
+            and your arc appears here.
+          </p>
+        </div>
+      )}
+
+      {snapshots !== null && snapshots.length > 0 && (
+        <TasteEvolutionChart snapshots={snapshots} />
+      )}
     </div>
   );
 }
 
 export default function TasteEvolutionPage() {
   return (
-    <Suspense fallback={null}>
-      <TasteEvolutionContent />
-    </Suspense>
+    <RequireAuth>
+      <Suspense fallback={null}>
+        <TasteEvolutionContent />
+      </Suspense>
+    </RequireAuth>
   );
 }

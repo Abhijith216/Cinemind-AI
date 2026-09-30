@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     port: int = 8000
     cors_origins: str = "http://localhost:3000"
 
+    # --- Rate limiting (per client per minute; 0 disables — set 0 for local
+    # demo/offline use, a real number whenever an API budget is at stake) ---
+    chat_rate_limit_per_minute: int = 10
+    search_rate_limit_per_minute: int = 30
+
     @property
     def cors_origin_list(self) -> list[str]:
         """CORS origins as a list, parsed from the comma-separated setting."""

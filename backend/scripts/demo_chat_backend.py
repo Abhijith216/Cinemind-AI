@@ -40,6 +40,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from app.core.db import get_db_session
+from app.core.rate_limit import reset_all_limiters
 from app.main import app
 from app.models import ChatMessage, Movie, Rating, TasteSnapshot, User
 
@@ -255,6 +256,8 @@ class DispatchingFakeSession:
         self.user = user
         self.static: dict[type[Any], Any] = {User: user}
         self.added: list[Any] = []
+        self.users_by_email: dict[str, User] = {user.email: user}
+        self.users_by_id: dict[Any, User] = {user.id: user}
 
     async def get(self, model: Any, key: Any) -> Any:
         for obj in self.added:
@@ -265,6 +268,21 @@ class DispatchingFakeSession:
         for obj in [*self.movies, *self.ratings, *self.snapshots]:
             if isinstance(obj, model) and getattr(obj, "id", None) == key:
                 return obj
+        return None
+
+    def _bound_user_id(self, statement: Any) -> Any:
+        """Extract a known user id from the statement's bound params, if any."""
+        try:
+            params = statement.compile().params
+        except Exception:  # noqa: BLE001 - fake session: never break on SQL
+            return None
+        for value in params.values():
+            try:
+                key = uuid.UUID(str(value))
+            except (ValueError, AttributeError, TypeError):
+                continue
+            if key in self.users_by_id:
+                return key
         return None
 
     def _loved_rows(self) -> list[tuple[Movie, int]]:
@@ -287,10 +305,25 @@ class DispatchingFakeSession:
         if "<=>" in sql:
             distances = [0.90, 0.85, 0.82, 0.78, 0.74, 0.70, 0.66]
             return FakeResult(list(zip(self.movies, distances, strict=True)))
+        if "users.email" in sql:
+            # Auth: duplicate-email check and login's user lookup.
+            params = statement.compile().params
+            email = next(
+                (v for k, v in params.items() if "email" in k), None
+            )
+            found = self.users_by_email.get(str(email)) if email else None
+            return FakeResult([found] if found else [])
         if "rated_at" in sql:
             return FakeResult([])  # month windows: snapshots are pre-seeded
         if "taste_snapshots" in sql:
-            return FakeResult(self.snapshots)
+            # Honor the user_id filter like a real WHERE would.
+            owner = self._bound_user_id(statement)
+            rows = (
+                [s for s in self.snapshots if s.user_id == owner]
+                if owner is not None
+                else self.snapshots
+            )
+            return FakeResult(rows)
         if "chat_messages" in sql:
             messages = [obj for obj in self.added if isinstance(obj, ChatMessage)]
             messages.sort(key=lambda message: message.created_at)
@@ -314,9 +347,26 @@ class DispatchingFakeSession:
 
     def add(self, obj: Any) -> None:
         self.added.append(obj)
+        if isinstance(obj, User):
+            self.users_by_email[obj.email] = obj
+            self.users_by_id[obj.id] = obj
 
     async def commit(self) -> None:
-        pass
+        # Emulate flush column defaults (the real DB assigns these on INSERT).
+        for obj in self.added:
+            if isinstance(obj, User):
+                if obj.id is None:
+                    obj.id = uuid.uuid4()
+                if obj.created_at is None:
+                    obj.created_at = datetime.now()
+                # add() indexed this user before the id existed — re-index now
+                # so user-scoped WHERE filters can match freshly registered
+                # users too.
+                self.users_by_id[obj.id] = obj
+                self.users_by_email[obj.email] = obj
+
+    async def refresh(self, obj: Any) -> None:
+        return None
 
 
 # --- mock OpenAI-compatible server ----------------------------------------------------
@@ -442,10 +492,14 @@ def main() -> None:
     os.environ["OPENAI_API_KEY"] = "demo-key"
     os.environ["OPENAI_BASE_URL"] = f"http://127.0.0.1:{MOCK_PORT}/v1"
     os.environ["LLM_MODEL"] = "demo-model"
+    # The demo is shared with UI walkthroughs — no rate-limit surprises.
+    os.environ["CHAT_RATE_LIMIT_PER_MINUTE"] = "0"
+    os.environ["SEARCH_RATE_LIMIT_PER_MINUTE"] = "0"
 
     from app.core.config import get_settings
 
     get_settings.cache_clear()
+    reset_all_limiters()
     logging.disable(logging.WARNING)
 
     server, thread = start_mock_server()
@@ -453,7 +507,12 @@ def main() -> None:
 
     movies = seed_movies()
     arrival = movie_by_title(movies, "Arrival")
-    user = User(id=DEMO_USER_ID, email="demo@cinemind.local", hashed_password="x")
+    user = User(
+        id=DEMO_USER_ID,
+        email="demo@cinemind.local",
+        hashed_password="x",
+        created_at=datetime.now(),
+    )
     db = DispatchingFakeSession(
         movies, seed_ratings(movies), seed_snapshots(), user
     )
@@ -462,6 +521,8 @@ def main() -> None:
         yield db
 
     app.dependency_overrides[get_db_session] = _yield_session
+    # Auth runs through the REAL /api/auth/* routes — the fake session above
+    # implements the email SELECTs and flush defaults they need.
 
     @app.get("/api/demo/urls")
     def demo_urls() -> dict[str, str]:
