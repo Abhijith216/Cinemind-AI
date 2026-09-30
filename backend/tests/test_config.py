@@ -4,8 +4,11 @@ from app.core.config import Settings, _to_asyncpg_url
 
 
 def test_normalizer_accepts_neon_style_urls() -> None:
-    """Vendor URLs work verbatim: driver added, sslmode stripped."""
-    raw = "postgresql://u:p@ep-x.aws.neon.tech/cinemind?sslmode=require"
+    """Vendor URLs work verbatim: driver added, libpq params stripped."""
+    raw = (
+        "postgresql://u:p@ep-x.aws.neon.tech/cinemind"
+        "?sslmode=require&channel_binding=require"
+    )
     assert _to_asyncpg_url(raw) == "postgresql+asyncpg://u:p@ep-x.aws.neon.tech/cinemind"
     assert _to_asyncpg_url("postgres://u:p@h/db") == "postgresql+asyncpg://u:p@h/db"
 

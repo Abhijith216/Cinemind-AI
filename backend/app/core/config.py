@@ -10,22 +10,29 @@ from functools import lru_cache
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Query params that libpq-style connection strings carry which asyncpg
+# rejects as connect() kwargs. TLS itself is governed by the DB_SSL setting.
+_LIBPQ_ONLY_PARAMS = ("sslmode=", "channel_binding=")
+
 
 def _to_asyncpg_url(url: str) -> str:
     """Normalize a Postgres URL to the asyncpg driver form.
 
     Neon/Supabase/Render hand out ``postgresql://user:pass@host/db`` (and
-    may append ``?sslmode=require``). asyncpg needs the ``+asyncpg`` driver
-    and rejects ``sslmode`` as a query param — strip it (DB_SSL governs TLS).
+    may append ``?sslmode=require&channel_binding=require``). asyncpg needs
+    the ``+asyncpg`` driver and rejects those libpq query params — strip
+    them (DB_SSL governs TLS).
     """
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql+asyncpg://", 1)
     elif url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    if "sslmode=" in url:
+    if "?" in url:
         base, _, query = url.partition("?")
         kept = "&".join(
-            part for part in query.split("&") if not part.startswith("sslmode=")
+            part
+            for part in query.split("&")
+            if not part.startswith(_LIBPQ_ONLY_PARAMS)
         )
         url = f"{base}?{kept}" if kept else base
     return url
