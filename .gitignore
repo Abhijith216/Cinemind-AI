@@ -36,3 +36,7 @@ Thumbs.db
 # --- Misc ---
 *.log
 tmp/
+.neon
+# Local agent tooling installed by `neon skills` (skills + skills-lock.json)
+.claude/
+skills-lock.json
