@@ -1,0 +1,73 @@
+# Render Blueprint for CineMind (frontend + backend Docker services).
+#
+# Deploy: push this repo to GitHub, then in the Render dashboard
+#   New → Blueprint → select the repo → Apply.
+# Render reads this file and creates both services. You fill in the
+# `sync: false` values (secrets + hosts) in the dashboard when prompted.
+#
+# Postgres is NOT created here on purpose: we use Neon (external, free tier,
+# pgvector supported). Create the Neon database first (DEPLOY.md §2) and
+# paste its two connection strings into the sync:false env vars below.
+#
+# Docs: https://render.com/docs/blueprint-spec
+
+databases: []  # Postgres lives on Neon; nothing to provision on Render.
+
+services:
+  # --- FastAPI backend ---------------------------------------------------------
+  - type: web
+    name: cinemind-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    preDeploy:
+      # One command per deploy: create/update the schema (idempotent).
+      # Uses DATABASE_URL_DIRECT — Neon's pooled endpoint can reject DDL.
+      command: sh -c "alembic upgrade head"
+    envVars:
+      - key: DATABASE_URL
+        sync: false        # Neon POOLED url (pc-...-pooler...neon.tech/...)
+      - key: DATABASE_URL_DIRECT
+        sync: false        # Neon DIRECT url (ep-...neon.tech/...)
+      - key: DB_SSL
+        value: require
+      - key: JWT_SECRET
+        generateValue: true   # Render generates & pins a strong secret
+      - key: TMDB_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_BASE_URL
+        value: https://api.openai.com/v1
+      - key: LLM_MODEL
+        value: gpt-4o-mini
+      - key: EMBEDDING_MODEL
+        value: text-embedding-3-large
+      - key: EMBEDDING_DIMENSIONS
+        value: "1536"
+      - key: CORS_ORIGINS
+        sync: false        # https://cinemind-web.onrender.com (set after first deploy)
+      - key: CHAT_RATE_LIMIT_PER_MINUTE
+        value: "10"
+      - key: SEARCH_RATE_LIMIT_PER_MINUTE
+        value: "30"
+      - key: LOG_FORMAT
+        value: json
+      - key: LOG_LEVEL
+        value: INFO
+
+  # --- Next.js frontend --------------------------------------------------------
+  - type: web
+    name: cinemind-web
+    runtime: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    plan: free
+    autoDeploy: true
+    envVars:
+      # Render exposes these to the Docker build; next build bakes them in.
+      - key: NEXT_PUBLIC_API_BASE_URL
+        sync: false        # https://cinemind-api.onrender.com (after first deploy)

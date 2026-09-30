@@ -15,7 +15,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+config.set_main_option("sqlalchemy.url", get_settings().migrations_url)
 
 target_metadata = Base.metadata
 
@@ -40,11 +40,14 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
-    """Run migrations with the async engine."""
+    """Run migrations with the async engine (TLS per DB_SSL)."""
+    settings = get_settings()
+    connect_args = {"ssl": "require"} if settings.db_ssl == "require" else {}
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=connect_args,
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

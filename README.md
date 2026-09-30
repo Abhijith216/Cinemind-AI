@@ -77,6 +77,13 @@ cd frontend && npm install && npm run dev   # http://localhost:3000
 Without Postgres reachable, `/health` still returns 200 with
 `"database":"down"`, so the API boots anywhere.
 
+## Deploying to production
+
+Render (backend + frontend Docker services) + Neon (managed Postgres with
+pgvector). The blueprint is [render.yaml](render.yaml); the full runbook —
+env var table, one-time TMDb ingestion / embedding / personality backfill
+steps, monitoring, troubleshooting — is [DEPLOY.md](DEPLOY.md).
+
 ## Modules (build order)
 
 ### ✅ Phase 0 — Scaffold + infra (done)

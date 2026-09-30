@@ -15,11 +15,29 @@ _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
+def engine_kwargs() -> dict[str, object]:
+    """Engine options shared by the app engine and one-off CLI engines.
+
+    ``pool_pre_ping`` + ``pool_recycle`` survive managed-Postgres idle
+    disconnects (Neon scales to zero and drops idle TCP); ``connect_args``
+    TLS matches the DB_SSL setting.
+    """
+    settings = get_settings()
+    kwargs: dict[str, object] = {
+        "echo": False,
+        "pool_pre_ping": True,
+        "pool_recycle": 1800,
+    }
+    if settings.db_ssl == "require":
+        kwargs["connect_args"] = {"ssl": "require"}
+    return kwargs
+
+
 def get_engine() -> AsyncEngine:
     """Return the process-wide async engine, creating it on first use."""
     global _engine
     if _engine is None:
-        _engine = create_async_engine(get_settings().database_url, echo=False)
+        _engine = create_async_engine(get_settings().database_url, **engine_kwargs())
     return _engine
 
 

@@ -46,3 +46,5 @@ class HealthOut(BaseModel):
     status: str
     version: str
     database: str
+    uptime_seconds: float | None = None
+    timestamp: str | None = None
