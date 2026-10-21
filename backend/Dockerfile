@@ -36,4 +36,4 @@ EXPOSE 8000
 # workers). PORT is injected by Render; local runs default to 8000.
 CMD ["./start.sh"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:${PORT:-8000}/health || exit 1
+    CMD curl -fsS http://127.0.0.1:${PORT:-8000}/ready || exit 1

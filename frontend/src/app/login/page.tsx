@@ -53,7 +53,7 @@ function LoginForm() {
     try {
       if (mode === "login") await login(email, password);
       else await register(email, password);
-      router.push(nextParam.startsWith("/") ? nextParam : "/profile");
+      router.push(nextParam.startsWith("/") && !nextParam.startsWith("//") && !nextParam.includes("\\") ? nextParam : "/profile");
     } catch (err) {
       setError(friendlyError(err));
     } finally {
@@ -62,13 +62,18 @@ function LoginForm() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-md px-4 py-16">
-      <Card className="border-border/80 bg-card/70 backdrop-blur-sm">
+    <div className="cinema-shell grid min-h-[calc(100dvh-9rem)] items-center gap-10 py-10 lg:grid-cols-[1.05fr_.95fr] lg:py-16">
+      <div className="relative hidden min-h-[650px] overflow-hidden rounded-[1.75rem] border border-border bg-cover bg-center lg:flex lg:flex-col lg:justify-end lg:p-12" style={{ backgroundImage: "linear-gradient(0deg, #100d0e 5%, transparent 85%), url('/cinema-hero.webp')" }}>
+        <p className="cinema-eyebrow relative">Your story continues</p>
+        <h1 className="cinema-display relative mt-4 max-w-xl text-5xl">A little closer to your next favorite.</h1>
+        <p className="relative mt-5 max-w-sm text-sm leading-relaxed text-foreground/75">Keep the films you love in one place. Your ratings shape the next recommendation.</p>
+      </div>
+      <Card className="cinema-surface mx-auto w-full max-w-lg rounded-[1.5rem] p-2 shadow-[0_20px_60px_rgba(0,0,0,.25)] sm:p-5">
         <CardHeader className="items-center text-center">
-          <span className="mx-auto mb-2 grid h-12 w-12 place-items-center rounded-xl bg-primary/15 text-primary shadow-[0_0_24px_hsl(var(--glow)/0.35)]">
+          <span className="mx-auto mb-2 grid h-12 w-12 place-items-center rounded-full bg-primary text-primary-foreground">
             <Clapperboard className="h-6 w-6" />
           </span>
-          <CardTitle className="text-xl">
+          <CardTitle className="text-3xl">
             {mode === "login" ? "Welcome back" : "Create your account"}
           </CardTitle>
           <CardDescription>

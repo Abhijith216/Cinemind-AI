@@ -6,31 +6,26 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
 /**
- * Movie-page boundary: covers unknown movie ids (404-ish renders) and
- * backend failures during server components — the page never whitescreens.
+ * Temporary movie-loading failures. Missing movies use not-found.tsx.
  */
-export default function MovieError({
-  reset,
-}: {
-  error: Error & { digest?: string };
-  reset: () => void;
-}) {
+export default function MovieError() {
   return (
-    <div className="mx-auto w-full max-w-md px-4 py-24">
+    <div className="cinema-shell flex min-h-[calc(100dvh-11rem)] items-center justify-center py-16">
       <div
-        className="rounded-xl border border-rose-500/30 bg-card/70 p-8 text-center"
+        className="cinema-surface w-full max-w-xl rounded-[1.5rem] p-8 text-center sm:p-12"
         role="alert"
       >
         <Link2Off className="mx-auto mb-3 h-8 w-8 text-rose-400" />
-        <h1 className="text-lg font-semibold">Movie not found or unavailable</h1>
+        <h1 className="cinema-display text-3xl sm:text-4xl">Movie details are unavailable</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          The backend may be down, or that movie id doesn't exist in the
-          catalog.
+          We could not reach the movie catalog. Try again in a moment.
         </p>
         <div className="mt-5 flex justify-center gap-3">
-          <Button variant="outline" onClick={reset}>
-            <RefreshCw className="size-4" /> Retry
-          </Button>
+          <form method="get" aria-label="Retry loading this movie">
+            <Button type="submit" variant="outline">
+              <RefreshCw className="size-4" /> Retry
+            </Button>
+          </form>
           <Link
             href="/"
             className="inline-flex h-10 items-center rounded-lg border border-border px-5 text-sm hover:bg-secondary/60"

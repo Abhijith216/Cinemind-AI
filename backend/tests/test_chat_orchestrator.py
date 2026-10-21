@@ -5,6 +5,7 @@ The required product-spec flow is covered end to end:
     -> final ranked + explained results.
 """
 
+import datetime
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -59,6 +60,12 @@ class FakeDBSession:
             key = obj.id if hasattr(obj, "id") else obj.user_id
             self.objects[(type(obj), key)] = obj
 
+    async def connection(self) -> None:
+        pass
+
+    async def rollback(self) -> None:
+        pass
+
     async def get(self, model: Any, key: Any) -> Any:
         found = self.objects.get((model, key))
         if found is not None:
@@ -71,9 +78,7 @@ class FakeDBSession:
 
     async def execute(self, _statement: Any) -> FakeResult:
         messages = [
-            obj
-            for obj in (*self.objects.values(), *self.added)
-            if isinstance(obj, ChatMessage)
+            obj for obj in (*self.objects.values(), *self.added) if isinstance(obj, ChatMessage)
         ]
         messages.sort(key=lambda message: message.created_at)
         return FakeResult(messages)
@@ -100,9 +105,15 @@ def _movie(index: int = 1, title: str | None = None) -> Movie:
         vote_count=2000,
         popularity=95.0,
         personality={
-            "emotion": 85, "mind_blowing": 90, "darkness": 40, "humor": 20,
-            "violence": 25, "romance": 25, "hopefulness": 55,
-            "plot_complexity": 85, "rewatchability": 75,
+            "emotion": 85,
+            "mind_blowing": 90,
+            "darkness": 40,
+            "humor": 20,
+            "violence": 25,
+            "romance": 25,
+            "hopefulness": 55,
+            "plot_complexity": 85,
+            "rewatchability": 75,
         },
     )
 
@@ -124,9 +135,7 @@ def _explanation(movie: Movie, intent: QueryIntent | None) -> Explanation:
         movie_id=str(movie.id),
         movie_title=movie.title or "",
         text=f"{movie.title} matches the mind-bending, emotional tone you asked for.",
-        matched_attributes=MatchedAttributes(
-            genres=["Science Fiction"], themes=["time"]
-        ),
+        matched_attributes=MatchedAttributes(genres=["Science Fiction"], themes=["time"]),
         source="template",
         query_intent=intent,
     )
@@ -159,15 +168,11 @@ class ScriptedParser:
             },
         }
 
-    async def __call__(
-        self, user_text: str, history: list[dict[str, str]]
-    ) -> QueryIntent:
+    async def __call__(self, user_text: str, history: list[dict[str, str]]) -> QueryIntent:
         self.history_seen.append(list(history))
         if user_text in self.clarifications:
             raise AmbiguousQueryError(self.clarifications[user_text])
-        return QueryIntent.model_validate(
-            self.intents.get(user_text, {"themes": ["anything"]})
-        )
+        return QueryIntent.model_validate(self.intents.get(user_text, {"themes": ["anything"]}))
 
 
 class RecordingPipeline:
@@ -291,24 +296,19 @@ async def test_unknown_session_id_raises_lookup_error() -> None:
 
 
 def test_filters_from_intent_maps_decade_and_recent() -> None:
-    nineties = _filters_from_intent(
-        QueryIntent.model_validate({"time_period": "1990s"})
-    )
+    nineties = _filters_from_intent(QueryIntent.model_validate({"time_period": "1990s"}))
     assert nineties.min_release_year == 1990 and nineties.max_release_year == 1999
 
-    recent = _filters_from_intent(
-        QueryIntent.model_validate({"time_period": "recent"})
-    )
-    assert recent.min_release_year == 2020 and recent.max_release_year is None
+    recent = _filters_from_intent(QueryIntent.model_validate({"time_period": "recent"}))
+    assert recent.min_release_year == datetime.date.today().year - 5
+    assert recent.max_release_year is None
 
     empty = _filters_from_intent(QueryIntent())
     assert empty.min_release_year is None and empty.max_release_year is None
 
 
 def test_filters_from_intent_ignores_far_future_decades() -> None:
-    filters = _filters_from_intent(
-        QueryIntent.model_validate({"time_period": "3000s"})
-    )
+    filters = _filters_from_intent(QueryIntent.model_validate({"time_period": "3000s"}))
     assert filters.min_release_year is None
 
 

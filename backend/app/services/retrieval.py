@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Select, or_, select
+from sqlalchemy import Select, func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import EMBEDDING_DIMENSIONS, Movie, Rating
@@ -152,11 +152,7 @@ async def fetch_user_history_vector(
     )
     rows = (await session.execute(statement)).scalars().all()
 
-    vectors = [
-        vector
-        for row in rows
-        if (vector := _personality_vector(row)) is not None
-    ]
+    vectors = [vector for row in rows if (vector := _personality_vector(row)) is not None]
     if not vectors:
         return None
 
@@ -167,16 +163,12 @@ async def fetch_user_history_vector(
     return [value / len(vectors) for value in average]
 
 
-def _candidate_statement(
-    query_embedding: list[float], filters: SearchFilters
-) -> Select[Any]:
+def _candidate_statement(query_embedding: list[float], filters: SearchFilters) -> Select[Any]:
     """Stage-1 SQL: cosine similarity in Postgres, top CANDIDATE_LIMIT rows."""
     statement = (
         select(
             Movie,
-            (1 - Movie.embedding.cosine_distance(query_embedding)).label(
-                "semantic_similarity"
-            ),
+            (1 - Movie.embedding.cosine_distance(query_embedding)).label("semantic_similarity"),
         )
         .where(Movie.embedding.is_not(None))
         .order_by(Movie.embedding.cosine_distance(query_embedding))
@@ -195,6 +187,18 @@ def _candidate_statement(
         )
     if filters.languages:
         statement = statement.where(Movie.language.in_(filters.languages))
+    for genre in filters.excluded_genres:
+        statement = statement.where(~Movie.genres.contains([genre]))
+    if filters.excluded_themes:
+        from app.services.catalog_search import _document
+
+        excluded = func.websearch_to_tsquery(
+            literal_column("'english'::regconfig"),
+            " OR ".join(filters.excluded_themes),
+        )
+        statement = statement.where(~_document().op("@@")(excluded))
+    if filters.max_runtime is not None:
+        statement = statement.where(Movie.runtime <= filters.max_runtime)
     return statement
 
 
@@ -268,8 +272,7 @@ async def hybrid_search(
     """Full pipeline: SQL candidates → weighted re-rank → top ``limit``."""
     if len(query_embedding) != EMBEDDING_DIMENSIONS:
         raise ValueError(
-            f"query embedding has {len(query_embedding)} dims; expected "
-            f"{EMBEDDING_DIMENSIONS}"
+            f"query embedding has {len(query_embedding)} dims; expected {EMBEDDING_DIMENSIONS}"
         )
 
     history_vector = await fetch_user_history_vector(session, user_id)

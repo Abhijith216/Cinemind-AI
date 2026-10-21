@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
+import Link from "next/link";
 
+import { MoviePoster } from "@/components/movie-poster";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,8 +21,11 @@ export interface MatchedAttributeGroup {
 }
 
 export interface MovieCardProps {
+  movieId?: string;
   title: string;
   year?: number | null;
+  runtime?: number | null;
+  overview?: string | null;
   rating?: number | null;
   posterUrl?: string | null;
   /** 1-3 sentence explanation (Phase 7) shown directly on the card. */
@@ -38,64 +43,50 @@ const KIND_STYLES: Record<MatchedAttributeGroup["kind"], string> = {
   intent: "bg-sky-500/10 text-sky-300 ring-sky-500/30",
 };
 
-function Poster({ title, posterUrl }: { title: string; posterUrl?: string | null }) {
-  if (posterUrl) {
-    // eslint-disable-next-line @next/next/no-img-element -- TMDb CDN URLs, next/image needs remotePatterns config
-    return (
-      <img
-        src={posterUrl}
-        alt={`${title} poster`}
-        className="h-60 w-full rounded-md object-cover"
-      />
-    );
-  }
-  return (
-    <div className="flex h-60 w-full items-center justify-center rounded-md bg-gradient-to-br from-amber-500/10 via-violet-500/10 to-transparent ring-1 ring-foreground/10">
-      <span className="px-4 text-center text-xs tracking-widest text-foreground/30 uppercase">
-        No poster
-      </span>
-    </div>
-  );
-}
-
-export function MovieCard({ title, year, rating, posterUrl, explanation, matched, className }: MovieCardProps) {
+export function MovieCard({ movieId, title, year, runtime, overview, rating, posterUrl, explanation, matched, className }: MovieCardProps) {
   const [expanded, setExpanded] = useState(false);
   const hasMatches = (matched?.length ?? 0) > 0;
 
   return (
     <Card
       className={cn(
-        "flex w-72 shrink-0 flex-col gap-3 border-border/60 bg-card/80 backdrop-blur transition-shadow",
-        explanation && "border-amber-500/25 shadow-[0_0_24px_-12px] shadow-amber-500/30",
+        "group flex w-72 shrink-0 flex-col gap-3 overflow-hidden rounded-[1.25rem] border-border/80 bg-card/95 transition-[border-color,transform,box-shadow] duration-300 hover:-translate-y-1 hover:border-primary/45 hover:shadow-[0_20px_50px_rgba(0,0,0,.28)]",
+        explanation && "border-primary/25",
         className,
       )}
     >
-      <CardContent className="flex flex-col gap-3">
-        <Poster title={title} posterUrl={posterUrl} />
+      <CardContent className="flex flex-col gap-3 p-0">
+        <MoviePoster title={title} posterUrl={posterUrl} className="cinema-card-image h-72 w-full" />
 
-        <div>
+        <div className="px-5 pt-2">
           <div className="flex items-start justify-between gap-2">
-            <h3 className="text-base leading-tight font-semibold">{title}</h3>
+            <h3 className="text-lg leading-tight font-semibold tracking-tight">
+              {movieId ? <Link href={`/movie/${movieId}`} className="rounded hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{title}</Link> : title}
+            </h3>
             {typeof rating === "number" && (
               <Badge variant="outline" className="shrink-0 border-amber-500/40 text-amber-300">
                 ★ {rating.toFixed(1)}
               </Badge>
             )}
           </div>
-          {typeof year === "number" && (
-            <p className="mt-0.5 text-xs text-muted-foreground">{year}</p>
+          {(typeof year === "number" || typeof runtime === "number") && (
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {[year, runtime ? `${runtime} min` : null].filter(Boolean).join(" · ")}
+            </p>
           )}
         </div>
 
+        {overview && <p className="line-clamp-3 px-5 text-sm leading-relaxed text-muted-foreground">{overview}</p>}
+
         {/* The key differentiator: the grounded explanation right on the card. */}
         {explanation ? (
-          <p className="text-sm leading-relaxed text-foreground/85">{explanation}</p>
+          <p className="px-5 text-sm leading-relaxed text-foreground/85">{explanation}</p>
         ) : (
-          <p className="text-sm text-muted-foreground italic">No explanation available yet.</p>
+          <p className="px-5 text-sm text-muted-foreground italic">No explanation available yet.</p>
         )}
 
         {hasMatches && (
-          <div className="border-t border-border/60 pt-2">
+          <div className="mx-5 mb-5 border-t border-border/60 pt-2">
             <Button
               variant="ghost"
               size="sm"

@@ -52,3 +52,10 @@ class HealthOut(BaseModel):
     database_error: str | None = None
     uptime_seconds: float | None = None
     timestamp: str | None = None
+
+
+class IntegrationStatus(BaseModel):
+    """Configuration flags only; no credentials, endpoints or health claims."""
+
+    chat_configured: bool
+    tmdb_configured: bool

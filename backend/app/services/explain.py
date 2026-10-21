@@ -512,7 +512,7 @@ async def explain_recommendation(
 # 4) Taste context loading (from real rating history).
 # ---------------------------------------------------------------------------
 
-_LOVED_THRESHOLD = 8.0
+_LOVED_THRESHOLD = 7.0
 
 
 async def build_user_taste_context(
@@ -520,7 +520,7 @@ async def build_user_taste_context(
 ) -> UserTasteContext | None:
     """Load the user's highest-rated movies for taste grounding.
 
-    Returns None for anonymous users or when no 8+ ratings exist.
+    Returns None for anonymous users or when no 7+ ratings exist.
     """
     if user_id is None:
         return None
@@ -532,7 +532,7 @@ async def build_user_taste_context(
         select(Movie, Rating.score)
         .join(Rating, Rating.movie_id == Movie.id)
         .where(Rating.user_id == user_id, Rating.score >= _LOVED_THRESHOLD)
-        .order_by(Rating.score.desc())
+        .order_by(Rating.score.desc(), Rating.rated_at.desc(), Movie.id)
         .limit(loved_limit)
     )
     rows = (await session.execute(statement)).all()

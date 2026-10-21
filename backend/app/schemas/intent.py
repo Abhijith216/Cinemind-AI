@@ -41,17 +41,50 @@ class QueryIntent(BaseModel):
     mood: str | None = None
     pace: str | None = None
     ending_type: str | None = None
-    themes: list[str] = Field(default_factory=list)
-    themes_exclude: list[str] = Field(default_factory=list)
-    genres_include: list[str] = Field(default_factory=list)
-    genres_exclude: list[str] = Field(default_factory=list)
+    themes: list[str] = Field(default_factory=list, max_length=20)
+    themes_exclude: list[str] = Field(default_factory=list, max_length=20)
+    genres_include: list[str] = Field(default_factory=list, max_length=20)
+    genres_exclude: list[str] = Field(default_factory=list, max_length=20)
     violence_tolerance: str | None = Field(
         default=None,
         description="One of: none | low | medium | high",
     )
-    similar_to: list[str] = Field(default_factory=list)
+    similar_to: list[str] = Field(default_factory=list, max_length=3)
     time_period: str | None = None
-    runtime_max: int | None = Field(default=None, ge=1)
+    runtime_max: int | None = Field(default=None, ge=1, le=1000)
+
+    @field_validator("genres_include", "genres_exclude")
+    @classmethod
+    def canonical_genres(cls, values: list[str]) -> list[str]:
+        names = [
+            "Action",
+            "Adventure",
+            "Animation",
+            "Comedy",
+            "Crime",
+            "Documentary",
+            "Drama",
+            "Family",
+            "Fantasy",
+            "History",
+            "Horror",
+            "Music",
+            "Mystery",
+            "Romance",
+            "Science Fiction",
+            "Thriller",
+            "War",
+            "Western",
+        ]
+        canonical = {name.lower(): name for name in names}
+        canonical.update({"sci-fi": "Science Fiction", "sci fi": "Science Fiction"})
+        return list(
+            dict.fromkeys(
+                canonical.get(value.strip().lower(), value.strip())
+                for value in values
+                if value.strip()
+            )
+        )
 
     # Present only when the request is too ambiguous to interpret.
     clarifying_question: str | None = None
@@ -65,9 +98,7 @@ class QueryIntent(BaseModel):
         allowed = {"none", "low", "medium", "high"}
         normalized = value.strip().lower()
         if normalized not in allowed:
-            raise ValueError(
-                f"violence_tolerance must be one of {sorted(allowed)}, got {value!r}"
-            )
+            raise ValueError(f"violence_tolerance must be one of {sorted(allowed)}, got {value!r}")
         return normalized
 
     @field_validator("runtime_max", mode="before")

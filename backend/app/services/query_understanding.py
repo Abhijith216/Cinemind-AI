@@ -11,12 +11,22 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from app.schemas.intent import QueryIntent
 from app.services.llm_client import ChatLLMClient, LLMError, create_chat_client
 
 logger = logging.getLogger("app.query_understanding")
+
+_GREETING = re.compile(
+    r"\s*(?:(?:hey|hi|hello|howdy|hiya|yo)(?:\s+(?:there|cinemind))?"
+    r"|good\s+(?:morning|afternoon|evening))[\s!.,?]*",
+    re.IGNORECASE,
+)
+GREETING_QUESTION = (
+    "Hey! What kind of movie are you in the mood for — a comedy, a thriller, or something else?"
+)
 
 SYSTEM_PROMPT = """You convert a user's free-text movie request into JSON.
 
@@ -50,7 +60,9 @@ Field rules:
 - mood: emotional register ("uplifting", "tense", "melancholic", ...).
 - pace: "slow-burn" | "moderate" | "fast-paced" | null.
 - ending_type: e.g. "mind-blowing twist", "bittersweet", "happy", "open".
-- time_period: e.g. "1970s", "1990s", "recent" — null if unstated.
+- time_period: release year ("2025"), decade ("1990s"), range ("2020-2026"),
+  or "recent" — null if unstated. This is the release period, not the story's setting.
+  Represent historical story settings as themes instead.
 - runtime_max: minutes, only when the user states a limit.
 
 Ambiguity rule:
@@ -62,6 +74,14 @@ Do not guess fields the user did not state or strongly imply.
 Conversation history may be provided: use it to resolve references like
 "something happier than that" or "the same but funnier", refining the
 PREVIOUS intent rather than starting from scratch.
+Preserve the previous resolved request's runtime, exclusions, reference movies,
+genres and themes unless the user explicitly changes or removes them.
+For "under N minutes", set runtime_max to N-1; "at most N" permits N.
+Return at most three reference titles, without appending release years.
+Do not infer that an excluded genre is wanted. Use canonical genre names:
+Action, Adventure, Animation, Comedy, Crime, Documentary, Drama, Family,
+Fantasy, History, Horror, Music, Mystery, Romance, Science Fiction, Thriller,
+War, Western.
 """
 
 
@@ -102,6 +122,11 @@ async def parse_query(
     Raises :class:`AmbiguousQueryError` when the model responds with a
     clarifying question instead of an interpretation.
     """
+    # A greeting contains no movie preferences to interpret. Keep this normal
+    # conversational turn independent of provider availability and credits.
+    if _GREETING.fullmatch(user_text):
+        raise AmbiguousQueryError(GREETING_QUESTION)
+
     owns_client = client is None
     if client is None:
         client = create_chat_client()
@@ -126,8 +151,19 @@ async def parse_query(
             await client.aclose()
 
     if intent.clarifying_question:
-        logger.info("Ambiguous query %r → clarifying question", user_text[:60])
+        logger.info("Movie request needs clarification")
         raise AmbiguousQueryError(intent.clarifying_question, intent)
+    # Reference films must originate in the user's conversation, never be
+    # invented recommendations used to steer or exclude catalog results.
+    user_context = " ".join(
+        [user_text, *(turn["content"] for turn in history if turn["role"] == "user")]
+    )
+
+    def normalize(value: str) -> str:
+        return " ".join(re.findall(r"\w+", value.casefold()))
+
+    context = f" {normalize(user_context)} "
+    intent.similar_to = [title for title in intent.similar_to if f" {normalize(title)} " in context]
     return intent
 
 

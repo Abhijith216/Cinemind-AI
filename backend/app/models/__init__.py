@@ -26,7 +26,9 @@ from typing import Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
+    Computed,
     DateTime,
     Float,
     ForeignKey,
@@ -36,13 +38,15 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
     mapped_column,
     relationship,
 )
+
+from app.core.search_document import SEARCH_DOCUMENT_SQL
 
 
 class Base(DeclarativeBase):
@@ -71,6 +75,7 @@ class Movie(Base):
     __table_args__ = (
         Index("ix_movies_genres_gin", "genres", postgresql_using="gin"),
         Index("ix_movies_keywords_gin", "keywords", postgresql_using="gin"),
+        Index("ix_movies_search_document_gin", "search_document", postgresql_using="gin"),
         Index(
             "ix_movies_embedding_hnsw",
             "embedding",
@@ -79,9 +84,7 @@ class Movie(Base):
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tmdb_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
     title: Mapped[str] = mapped_column(Text)
     overview: Mapped[str | None] = mapped_column(Text)
@@ -94,10 +97,13 @@ class Movie(Base):
     vote_average: Mapped[float | None] = mapped_column(Float)
     vote_count: Mapped[int | None] = mapped_column(Integer)
     popularity: Mapped[float | None] = mapped_column(Float)
-    embedding = mapped_column(
-        Vector(dim=EMBEDDING_DIMENSIONS), nullable=True
-    )
+    embedding = mapped_column(Vector(dim=EMBEDDING_DIMENSIONS), nullable=True)
     personality: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    search_document: Mapped[str | None] = mapped_column(
+        TSVECTOR, Computed(SEARCH_DOCUMENT_SQL, persisted=True)
+    )
+    tmdb_checked_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
+    tmdb_synced_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -108,14 +114,19 @@ class Movie(Base):
     ratings: Mapped[list["Rating"]] = relationship(back_populates="movie")
 
 
+class RateLimitBucket(Base):
+    __tablename__ = "rate_limit_buckets"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    bucket: Mapped[int] = mapped_column(BigInteger, primary_key=True, index=True)
+    hits: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class User(Base):
     """A CineMind user."""
 
     __tablename__ = "users"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(Text, unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(
@@ -144,9 +155,7 @@ class UserTasteProfile(Base):
     )
     likes: Mapped[list[Any]] = mapped_column(JSONB, default=list, nullable=False)
     dislikes: Mapped[list[Any]] = mapped_column(JSONB, default=list, nullable=False)
-    favorite_themes: Mapped[list[Any]] = mapped_column(
-        JSONB, default=list, nullable=False
-    )
+    favorite_themes: Mapped[list[Any]] = mapped_column(JSONB, default=list, nullable=False)
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -169,9 +178,7 @@ class Rating(Base):
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
@@ -196,9 +203,7 @@ class TasteSnapshot(Base):
         Index("uq_taste_snapshots_user_month", "user_id", "month", unique=True),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
@@ -216,12 +221,11 @@ class ChatSession(Base):
     """Module 8: one conversation between a user and CineMind."""
 
     __tablename__ = "chat_sessions"
+    __table_args__ = (Index("ix_chat_sessions_user_updated", "user_id", "updated_at", "id"),)
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=True
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -247,9 +251,7 @@ class ChatMessage(Base):
 
     __tablename__ = "chat_messages"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("chat_sessions.id", ondelete="CASCADE"), index=True
     )

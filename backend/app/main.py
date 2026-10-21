@@ -32,8 +32,9 @@ async def log_requests(request: Request, call_next: object) -> object:
     start = time.perf_counter()
     handler = cast(Callable[[Request], Awaitable[object]], call_next)
     response = await handler(request)
-    path = request.url.path
-    if path not in {"/health", "/api/health"}:
+    route = request.scope.get("route")
+    path = getattr(route, "path", "<unmatched>")
+    if path not in {"/health", "/api/health", "/ready", "/api/ready"}:
         logger.info(
             "request",
             extra={

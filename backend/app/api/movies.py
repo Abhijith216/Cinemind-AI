@@ -6,6 +6,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.chat import chat_actor
 from app.core.db import get_db_session
 from app.models import Movie
 from app.schemas.common import MovieOut
@@ -38,11 +39,14 @@ async def get_recommendation_graph(
     movie_id: uuid.UUID,
     user_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db_session),
+    actor: uuid.UUID | None = Depends(chat_actor),
 ) -> RecommendationGraph:
     """The structured "why" graph: movie ↔ shared attributes ↔ rated movies.
 
     Grounds the graph in ``user_id``'s ratings when provided; otherwise
     returns the movie node with an explanatory note.
     """
+    if user_id is not None and user_id != actor:
+        raise HTTPException(status_code=403, detail="You can only view your own rating connections")
     movie = await _get_movie_or_404(db, movie_id)
     return await build_recommendation_graph(db, movie, user_id)

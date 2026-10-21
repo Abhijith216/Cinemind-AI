@@ -3,7 +3,7 @@
 import datetime
 import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.common import MovieOut
 from app.schemas.explanation import MatchedAttributes
@@ -16,10 +16,15 @@ class ChatMessageRequest(BaseModel):
     session_id: uuid.UUID | None = Field(
         default=None, description="Omit to start a new conversation."
     )
-    user_id: uuid.UUID | None = Field(
-        default=None, description="Anonymous chats are allowed."
-    )
+    user_id: uuid.UUID | None = Field(default=None, description="Anonymous chats are allowed.")
     result_limit: int = Field(default=5, ge=1, le=20)
+
+    @field_validator("message")
+    @classmethod
+    def trim_message(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Enter a message")
+        return value.strip()
 
 
 class ChatMovieOut(BaseModel):
@@ -50,6 +55,7 @@ class ChatStoredMessage(BaseModel):
     intent: dict[str, object] | None = None
     result_movie_ids: list[str] | None = None
     created_at: datetime.datetime
+    results: list[ChatMovieOut] = Field(default_factory=list)
 
 
 class ChatSessionOut(BaseModel):
@@ -59,3 +65,16 @@ class ChatSessionOut(BaseModel):
     user_id: uuid.UUID | None
     created_at: datetime.datetime | None
     messages: list[ChatStoredMessage] = Field(default_factory=list)
+
+
+class ChatSessionSummary(BaseModel):
+    id: uuid.UUID
+    title: str
+    updated_at: datetime.datetime
+
+
+class ChatHistoryOut(BaseModel):
+    items: list[ChatSessionSummary]
+    total: int
+    offset: int
+    limit: int

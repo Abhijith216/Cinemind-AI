@@ -7,7 +7,8 @@
  */
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+  (typeof window === "undefined" ? process.env.API_INTERNAL_BASE_URL : undefined)
+  ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 let authToken: string | null = null;
 
@@ -29,7 +30,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...((init?.headers as Record<string, string>) ?? {}),
@@ -39,7 +40,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers,
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: init?.signal
+      ? AbortSignal.any([init.signal, AbortSignal.timeout(timeoutMs)])
+      : AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
     let detail = `API error ${response.status}`;
@@ -51,6 +54,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(response.status, detail);
   }
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
@@ -60,6 +64,11 @@ export interface HealthResponse {
   status: string;
   version: string;
   database: "up" | "down";
+}
+
+export interface IntegrationStatus {
+  chat_configured: boolean;
+  tmdb_configured: boolean;
 }
 
 /** schemas/auth.py */
@@ -112,6 +121,7 @@ export interface SearchFilters {
   min_rating: number | null;
   min_release_year: number | null;
   max_release_year: number | null;
+  max_runtime: number | null;
 }
 
 export interface ComponentScores {
@@ -139,6 +149,17 @@ export interface SearchRequest {
   filters?: Partial<SearchFilters>;
   user_id?: string | null;
   limit?: number;
+}
+
+export interface DiscoverResponse {
+  query: string;
+  search_mode: "catalog";
+  notice: string;
+  results: {
+    movie: MovieOut;
+    explanation: string;
+    matched_terms: string[];
+  }[];
 }
 
 /** schemas/explanation.py */
@@ -180,6 +201,7 @@ export interface ChatStoredMessage {
   intent: Record<string, unknown> | null;
   result_movie_ids: string[] | null;
   created_at: string;
+  results: ChatMovieOut[];
 }
 
 export interface ChatSessionOut {
@@ -211,6 +233,31 @@ export interface TasteProfileOut {
   dislikes: string[];
   favorite_themes: string[];
   updated_at: string | null;
+}
+
+export interface RatedMovieOut {
+  id: string;
+  movie: MovieOut;
+  score: number;
+  rated_at: string;
+}
+
+export interface TasteDashboardOut {
+  profile: TasteProfileOut | null;
+  total_ratings: number;
+  average_score: number | null;
+  ratings: RatedMovieOut[];
+  recommendations: TasteRecommendationOut[];
+}
+
+export interface RatingHistoryOut { items: RatedMovieOut[]; total: number; offset: number; limit: number; }
+export interface ChatSessionSummary { id: string; title: string; updated_at: string; }
+export interface ChatHistoryOut { items: ChatSessionSummary[]; total: number; offset: number; limit: number; }
+
+export interface TasteRecommendationOut extends MovieOut {
+  explanation: string;
+  matched_attributes: MatchedAttributes;
+  preference_score: number;
 }
 
 export interface TasteSnapshotOut {
@@ -246,6 +293,7 @@ export interface RecommendationGraph {
 // --- endpoint wrappers ---------------------------------------------------------------
 
 export const api = {
+  integrations: () => request<IntegrationStatus>("/api/integrations"),
   health: () => request<HealthResponse>("/health"),
 
   auth: {
@@ -274,6 +322,12 @@ export const api = {
   },
 
   search: {
+    discover: (payload: SearchRequest, signal?: AbortSignal) =>
+      request<DiscoverResponse>("/api/search/discover", {
+        method: "POST",
+        body: JSON.stringify(payload),
+        signal,
+      }),
     hybrid: (payload: SearchRequest) =>
       request<SearchResponse>("/api/search/hybrid", {
         method: "POST",
@@ -282,16 +336,22 @@ export const api = {
   },
 
   chat: {
+    history: (offset = 0, signal?: AbortSignal) => request<ChatHistoryOut>(`/api/chat/sessions?offset=${offset}&limit=20`, { signal }),
+    remove: (sessionId: string, signal?: AbortSignal) => request<void>(`/api/chat/sessions/${sessionId}`, { method: "DELETE", signal }),
     sendMessage: (payload: ChatMessageRequest) =>
       request<ChatTurnResponse>("/api/chat/message", {
         method: "POST",
         body: JSON.stringify(payload),
-      }),
-    getSession: (sessionId: string) =>
-      request<ChatSessionOut>(`/api/chat/sessions/${sessionId}`),
+      }, 75_000),
+    getSession: (sessionId: string, signal?: AbortSignal) =>
+      request<ChatSessionOut>(`/api/chat/sessions/${sessionId}`, { signal }),
   },
 
   ratings: {
+    history: (offset = 0, signal?: AbortSignal) => request<RatingHistoryOut>(`/api/ratings/history?offset=${offset}&limit=50`, { signal }),
+    remove: (movieId: string) => request<void>(`/api/ratings/${movieId}`, { method: "DELETE" }),
+    get: (movieId: string, signal?: AbortSignal) =>
+      request<RatingOut | null>(`/api/ratings/${movieId}`, { signal }),
     create: (payload: RatingCreate) =>
       request<RatingOut>("/api/ratings", {
         method: "POST",
@@ -300,6 +360,8 @@ export const api = {
   },
 
   users: {
+    tasteDashboard: (userId: string, signal?: AbortSignal) =>
+      request<TasteDashboardOut>(`/api/users/${userId}/taste-dashboard`, { signal }),
     tasteProfile: (userId: string) =>
       request<TasteProfileOut>(`/api/users/${userId}/taste-profile`),
     tasteEvolution: (userId: string) =>

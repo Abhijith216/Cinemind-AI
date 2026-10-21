@@ -23,13 +23,13 @@ export default function GlobalRouteError({
   }, [error]);
 
   return (
-    <div className="mx-auto w-full max-w-md px-4 py-24">
+    <div className="cinema-shell flex min-h-[calc(100dvh-11rem)] items-center justify-center py-16">
       <div
-        className="rounded-xl border border-rose-500/30 bg-card/70 p-8 text-center"
+        className="cinema-surface w-full max-w-xl rounded-[1.5rem] p-8 text-center sm:p-12"
         role="alert"
       >
         <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-rose-400" />
-        <h1 className="text-lg font-semibold">Something went wrong</h1>
+        <h1 className="cinema-display text-3xl sm:text-4xl">Something went wrong</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           An unexpected error interrupted this page. Your data is safe — try
           again.

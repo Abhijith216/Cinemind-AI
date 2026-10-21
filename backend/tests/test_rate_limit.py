@@ -27,6 +27,12 @@ class _FakeResult:
 
 
 class _FakeSession:
+    async def rollback(self) -> None:
+        pass
+
+    async def connection(self) -> None:
+        pass
+
     async def get(self, model: Any, key: Any) -> Any:
         return None
 
@@ -96,7 +102,7 @@ def test_endpoints_return_429_with_retry_after(monkeypatch) -> None:
         _set_limits(chat=1, search=1)
         client = TestClient(app)
 
-        first = client.post("/api/chat/message", json={"message": "hi"})
+        first = client.post("/api/chat/message", json={"message": "Find a comedy"})
         assert first.status_code == 503, first.text  # provider unreachable → 503, not a crash
         second = client.post("/api/chat/message", json={"message": "hi again"})
         assert second.status_code == 429, second.text
@@ -114,6 +120,12 @@ def test_endpoints_return_429_with_retry_after(monkeypatch) -> None:
 
 
 def test_zero_limit_disables_limiting_on_endpoints(monkeypatch) -> None:
+    from app.services.embeddings import EmbeddingError
+
+    async def unavailable(_query: str) -> list[float]:
+        raise EmbeddingError("Test provider unavailable")
+
+    monkeypatch.setattr("app.api.search.embed_query", unavailable)
     app.dependency_overrides[get_db_session] = _yield_fake_session
 
     try:

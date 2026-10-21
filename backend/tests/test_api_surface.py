@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.db import get_db_session
-from app.core.security import decode_access_token
+from app.core.security import create_access_token, decode_access_token
 from app.main import app
 from app.models import Movie, TasteSnapshot, User
 
@@ -51,11 +51,7 @@ def test_every_route_has_a_response_model() -> None:
             assert "responses" in operation and operation["responses"], (
                 f"{method.upper()} {path} has no documented responses"
             )
-            success = [
-                code
-                for code in operation["responses"]
-                if code.startswith(("2", "3"))
-            ]
+            success = [code for code in operation["responses"] if code.startswith(("2", "3"))]
             assert success, f"{method.upper()} {path} lacks a 2xx/3xx response"
 
 
@@ -78,6 +74,9 @@ class FakeResult:
 
 class FakeSession:
     """get/execute/commit double; execute() dispatches on table name."""
+
+    async def connection(self) -> None:
+        pass
 
     def __init__(self, rows: list[Any] | None = None) -> None:
         self.objects: dict[tuple[type, Any], Any] = {}
@@ -104,14 +103,10 @@ class FakeSession:
         if "ratings" in sql:
             return FakeResult(self.rows)
         if "taste_snapshots" in sql:
-            snapshots = [
-                obj for obj in self.objects.values() if isinstance(obj, TasteSnapshot)
-            ]
+            snapshots = [obj for obj in self.objects.values() if isinstance(obj, TasteSnapshot)]
             return FakeResult(sorted(snapshots, key=lambda row: row.month))
         if "users" in sql:
-            return FakeResult(
-                [obj for obj in self.objects.values() if isinstance(obj, User)]
-            )
+            return FakeResult([obj for obj in self.objects.values() if isinstance(obj, User)])
         return FakeResult([])
 
     def add(self, obj: Any) -> None:
@@ -197,10 +192,7 @@ def test_register_login_flow_issues_valid_jwt(api: Any) -> None:
         json={"email": "demo@cinemind.dev", "password": "correct horse battery"},
     )
     assert logged_in.status_code == 200
-    assert (
-        decode_access_token(logged_in.json()["access_token"])
-        == uuid.UUID(body["user"]["id"])
-    )
+    assert decode_access_token(logged_in.json()["access_token"]) == uuid.UUID(body["user"]["id"])
 
     # Wrong password → 401 (the fake returns the user; verification fails).
     wrong = api.post(
@@ -264,6 +256,7 @@ def test_get_movie_endpoint(api: Any) -> None:
 
 
 def test_recommendation_graph_grounds_in_rated_movies(api: Any) -> None:
+    owner = uuid.uuid4()
     arrival = _movie(keywords=["time", "language"])
     interstellar = _movie(
         tmdb_id=2,
@@ -278,7 +271,8 @@ def test_recommendation_graph_grounds_in_rated_movies(api: Any) -> None:
 
     graph = api.get(
         f"/api/movies/{arrival.id}/recommendation-graph",
-        params={"user_id": str(uuid.uuid4())},
+        params={"user_id": str(owner)},
+        headers={"Authorization": f"Bearer {create_access_token(owner)}"},
     )
     assert graph.status_code == 200
     body = graph.json()
@@ -290,6 +284,7 @@ def test_recommendation_graph_grounds_in_rated_movies(api: Any) -> None:
 
 
 def test_recommendation_graph_notes_missing_grounding(api: Any) -> None:
+    owner = uuid.uuid4()
     movie = _movie()
     session = FakeSession()
     session.register(movie)
@@ -301,9 +296,10 @@ def test_recommendation_graph_notes_missing_grounding(api: Any) -> None:
 
     rated_none = api.get(
         f"/api/movies/{movie.id}/recommendation-graph",
-        params={"user_id": str(uuid.uuid4())},
+        params={"user_id": str(owner)},
+        headers={"Authorization": f"Bearer {create_access_token(owner)}"},
     )
-    assert "not rated any movies" in rated_none.json()["note"]
+    assert "rated 7 or higher" in rated_none.json()["note"]
 
 
 # --- users: taste evolution ------------------------------------------------------------------
@@ -311,32 +307,44 @@ def test_recommendation_graph_notes_missing_grounding(api: Any) -> None:
 
 def test_taste_evolution_returns_sorted_snapshots(api: Any) -> None:
     user = User(
-        id=uuid.uuid4(), email="evo@cinemind.dev", hashed_password="x",
+        id=uuid.uuid4(),
+        email="evo@cinemind.dev",
+        hashed_password="x",
         created_at=datetime.datetime.now(datetime.UTC),
     )
     snapshots = [
         TasteSnapshot(
             id=uuid.uuid4(),
-            user_id=user.id, month="2026-08",
-            dominant_genres=["Comedy"], dominant_themes=["pranks"],
+            user_id=user.id,
+            month="2026-08",
+            dominant_genres=["Comedy"],
+            dominant_themes=["pranks"],
         ),
         TasteSnapshot(
             id=uuid.uuid4(),
-            user_id=user.id, month="2026-09",
-            dominant_genres=["Science Fiction"], dominant_themes=["time"],
+            user_id=user.id,
+            month="2026-09",
+            dominant_genres=["Science Fiction"],
+            dominant_themes=["time"],
         ),
     ]
-    session = FakeSession()
+    session = FakeSession(
+        rows=[
+            (["Science Fiction"], ["time"], 9, datetime.datetime(2026, 9, 1, tzinfo=datetime.UTC)),
+            (["Comedy"], ["pranks"], 8, datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)),
+        ]
+    )
     session.register(user, *snapshots)
     _override(session)
 
-    evolution = api.get(f"/api/users/{user.id}/taste-evolution")
+    headers = {"Authorization": f"Bearer {create_access_token(user.id)}"}
+    evolution = api.get(f"/api/users/{user.id}/taste-evolution", headers=headers)
     assert evolution.status_code == 200
     months = [row["month"] for row in evolution.json()]
     assert months == ["2026-08", "2026-09"]
 
-    missing_user = api.get(f"/api/users/{uuid.uuid4()}/taste-evolution")
-    assert missing_user.status_code == 404
+    missing_user = api.get(f"/api/users/{uuid.uuid4()}/taste-evolution", headers=headers)
+    assert missing_user.status_code == 403
 
 
 # --- chat session replay ------------------------------------------------------------------------

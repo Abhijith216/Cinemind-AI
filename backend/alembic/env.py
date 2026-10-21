@@ -2,12 +2,13 @@
 
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from alembic import context
 from app.core.config import get_settings
+from app.core.db import engine_kwargs
 from app.models import Base
 
 config = context.config
@@ -41,8 +42,7 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     """Run migrations with the async engine (TLS per DB_SSL)."""
-    settings = get_settings()
-    connect_args = {"ssl": "require"} if settings.db_ssl == "require" else {}
+    connect_args = engine_kwargs()["connect_args"]
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

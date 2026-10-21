@@ -5,6 +5,188 @@
 ending"* — and CineMind returns ranked recommendations, each with a
 plain-English explanation grounded in real movie attributes, not LLM vibes.
 
+## My Taste and movie ratings
+
+Sign in or register, then open **My Taste**. Search a movie you have watched,
+select **Rate**, choose a score from 1–10, and save. You can also rate a movie
+from its detail page. Recent ratings can be edited from My Taste.
+
+Scores of 7–10 build likes and favorite themes; 1–4 build dislikes; 5–6 are
+neutral. Saving a correction rebuilds the profile from current ratings, so
+old preferences do not linger. Suggestions use matching movie metadata,
+penalize disliked attributes, and exclude movies already rated.
+
+**Taste evolution** updates directly from saved ratings of 7 or higher,
+grouped by the UTC month the movie was first rated. It works after the first
+liked movie and needs no monthly job. A correction also changes that month's
+summary. The legacy snapshot CLI remains available for offline exports.
+
+Ratings, profiles, history, timelines and personalized graphs/searches enforce
+account ownership on the server. The signed-out page explains the feature;
+it does not expose another account's data. Passwords and API credentials stay
+out of client source and test output.
+
+For opt-in live QA, set up an isolated test account in the ignored
+`tmp/taste-qa.json` file (`user_id`, `token`), then run
+`$env:CINEMIND_LIVE_TASTE='1'; npm --prefix frontend test -- --run tests/profile-live.test.tsx`.
+This test saves and edits one movie rating in that account.
+
+## AI chat and live TMDb setup
+
+Release-readiness and history/deletion controls are described in
+[STAGE_4_RELEASE_READINESS.md](STAGE_4_RELEASE_READINESS.md), including the
+remaining Docker/CI checks and deployment settings. Use `/ready` for deployment
+readiness; `/health` retains liveness diagnostics.
+
+Chat now uses authenticated rating history to rerank eligible films, and My Taste
+shows factual reasons and matched attributes for its suggestions. Genre, runtime
+and supported release-period constraints remain hard filters. Pace, scene-level
+violence and endings lack verified coverage and are explicitly disclosed in chat.
+See [STAGE_3_RECOMMENDATIONS.md](STAGE_3_RECOMMENDATIONS.md) for verification and limits.
+
+The local setup uses OpenRouter's `openrouter/free` router. Set these values
+in `backend/.env` (keep credentials out of Git and chat):
+
+```dotenv
+OPENAI_API_KEY=your-openrouter-key
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+LLM_MODEL=openrouter/free
+LLM_STRUCTURED_OUTPUTS=true
+LLM_DISABLE_REASONING=true
+TMDB_API_KEY=your-tmdb-read-access-token-or-v3-key
+```
+
+Get keys from [OpenRouter](https://openrouter.ai/settings/keys) and
+[TMDb API settings](https://www.themoviedb.org/settings/api). The configured
+OpenRouter selects a free model supporting the requested output format;
+availability and rate limits apply. It does not fall back to a paid model.
+Requests cap the output at 1,024 tokens. Restart the backend after changing `.env`.
+
+Chat uses one AI interpretation call (with one repair attempt for malformed
+JSON), then searches the saved movie catalog. No embedding backfill is needed.
+Runtime limits and genre/theme exclusions are enforced in the database.
+Follow-ups receive the recent conversation and its resolved intent so they can
+preserve previous constraints. Explanations use verified movie attributes.
+Reloading chat restores messages and movie cards; New chat clears the local
+conversation selection. Anonymous session IDs are unlisted access capabilities;
+keep them private. Account-owned sessions also require the owner's valid JWT.
+
+Verify real services and refresh public movie metadata from `backend/`:
+
+```powershell
+../.venv/Scripts/python.exe -m app.services.check_integrations
+# Apply schema updates, then backfill existing films and import newer releases:
+../.venv/Scripts/python.exe -m alembic upgrade head
+../.venv/Scripts/python.exe -m app.services.catalog_refresh --limit 6000 --pages 15
+# Dedicated daily maintenance process (keep it running):
+../.venv/Scripts/python.exe -m app.services.catalog_refresh --limit 1000 --pages 10 --interval-hours 24
+```
+
+If upgrading an existing database, first run `python -m alembic upgrade head`
+from `backend/`. Migration 0003 makes the chat session's user ID optional so
+anonymous conversations can be saved; it preserves all existing records.
+
+Migration 0004 adds resumable metadata-refresh timestamps. See
+[CATALOG_REFRESH.md](CATALOG_REFRESH.md) for scheduling, progress, failures,
+and the optional Docker Compose maintenance worker.
+
+Refreshes preserve IDs, ratings, profiles and existing personality traits.
+Embeddings are invalidated only when title, plot, genres or keywords change.
+Chat also checks TMDb for up to three missing reference titles when configured;
+only exact title matches are imported. If TMDb is unavailable, saved catalog
+search remains available. `/api/integrations` exposes configuration flags only,
+not a claim that credentials have been verified.
+Discover also imports an exact TMDb title match when the saved catalog has no
+matching results. A broader or unrelated TMDb search hit is never substituted.
+
+After the integration check succeeds and both dev servers are running,
+exercise chat's real provider/database path from the repository root:
+
+```powershell
+$env:CINEMIND_LIVE_AI = '1'
+npm.cmd --prefix frontend test -- tests/chat-live.test.tsx
+Remove-Item Env:CINEMIND_LIVE_AI
+```
+
+The default test suite uses explicit provider doubles and never spends API
+credits. The opt-in live test sends one public sample movie request and verifies
+recommendation cards and conversation recovery against real services.
+
+## Working local Discover
+
+Discover now uses `POST /api/search/discover` to search real movie metadata
+in Postgres without an embedding or chat API key. The form supports Enter,
+clickable suggestions, genre/runtime filters, loading, retry and empty states.
+Cards include the source synopsis, runtime, rating, matching attributes and a
+link to the movie detail page. This is catalog search; AI mood matching and
+conversation still require provider configuration.
+
+From the repository root, run these in **two terminals** on Windows:
+
+```powershell
+npm.cmd run dev:backend
+npm.cmd run dev:frontend
+```
+
+Open <http://127.0.0.1:3000>. Backend settings load the root `.env.local`
+followed by `backend/.env` (backend values override shared values; process
+environment variables take precedence over both). A saved remote database URL
+uses TLS automatically unless `DB_SSL` explicitly overrides that choice.
+Both `localhost:3000` and `127.0.0.1:3000` are allowed local browser origins.
+
+To populate a fresh database with the same starter catalog:
+
+```powershell
+New-Item -ItemType Directory -Force tmp | Out-Null
+Invoke-WebRequest https://raw.githubusercontent.com/vamshi121/TMDB-5000-Movie-Dataset/main/tmdb_5000_movies.csv -OutFile tmp/tmdb_5000_movies.csv
+# Run migrations/import from backend so Alembic and Python resolve app paths:
+Push-Location backend
+../.venv/Scripts/python.exe -m alembic upgrade head
+../.venv/Scripts/python.exe -m app.services.starter_catalog --csv ../tmp/tmdb_5000_movies.csv
+Pop-Location
+```
+
+The starter import is
+explicit and inserts missing TMDb IDs only; it never overwrites an existing
+record. [Dataset source](https://github.com/vamshi121/TMDB-5000-Movie-Dataset)
+(4,803 historical films; SHA256
+`1e0584a8dd374120e4ed4f2b81f0d2bd0eb95a554708e4a350d00ed5c46d2825`).
+Ratings are historical snapshot values. The CSV has no poster paths or
+embeddings; the UI shows a title fallback when a poster is unavailable.
+Use the existing TMDb ingestion/embedding commands below to update and enrich
+the catalog when those services are configured.
+
+Verification:
+
+```powershell
+npm.cmd run test:backend
+npm.cmd run test:frontend
+npm.cmd --prefix frontend run typecheck
+npm.cmd --prefix frontend run lint
+npm.cmd --prefix frontend run build
+```
+
+With the backend running and the catalog imported, also exercise the actual
+Discover component and API client against the live database (no fetch mocks):
+
+```powershell
+$env:CINEMIND_LIVE_TESTS = '1'
+npm.cmd --prefix frontend test -- tests/discover-live.test.tsx
+Remove-Item Env:CINEMIND_LIVE_TESTS
+```
+
+This test checks DOM behavior and the live API/data boundary. It does not
+replace a visual browser review. The dependency audit still reports seven
+transitive/toolchain advisories after compatible updates; resolving the
+remaining reports requires a separate dependency compatibility review.
+
+Try `Interstellar`, `like Interstellar but not about space`,
+`mind-bending, emotional, under two hours`, or `cozy comedy` with a runtime
+filter. Natural-language handling covers common aliases, one reference title,
+simple exclusions and “under N hours/minutes”; it is not unrestricted AI
+reasoning. Unknown reference titles and unmatched terms return an empty result
+instead of unrelated recommendations.
+
 ## Stack
 
 | Layer      | Tech |
@@ -39,13 +221,19 @@ docker-compose.yml      postgres+pgvector, backend, frontend
 
 ```bash
 cp backend/.env.example backend/.env   # fill in keys when you need TMDb/LLM features
-docker compose up --build
+# Configure a unique strong JWT_SECRET in backend/.env before starting Compose.
+docker compose --env-file backend/.env up --build
 ```
 
 That starts:
 - **Postgres 17 + pgvector** on `localhost:5432` (extension pre-enabled image `pgvector/pgvector`)
 - **FastAPI** on `http://localhost:8000` — migrations run automatically on boot
 - **Next.js** on `http://localhost:3000`
+
+The explicit `--env-file` passes locally configured API keys and provider settings
+into Compose interpolation. The default chat endpoint/model match OpenRouter's
+free router, with structured output enabled and reasoning disabled. Override
+these settings in `backend/.env` when choosing another compatible provider.
 
 ### Verify the deliverable
 
@@ -54,10 +242,10 @@ curl http://localhost:8000/health
 # {"status":"ok","version":"0.1.0","database":"up"}
 
 # Postgres really is Postgres, with pgvector:
-docker compose exec db psql -U cinemind -d cinemind -c "SELECT extname FROM pg_extension WHERE extname='vector';"
+docker compose --env-file backend/.env exec db psql -U cinemind -d cinemind -c "SELECT extname FROM pg_extension WHERE extname='vector';"
 
 # Stop everything:
-docker compose down
+docker compose --env-file backend/.env down
 ```
 
 ## Local (no Docker) development
@@ -68,7 +256,7 @@ python -m venv .venv
 .venv/Scripts/pip install -r backend/requirements-dev.txt   # Windows Git Bash
 # macOS/Linux: pip install -r backend/requirements-dev.txt
 cd backend && ../.venv/Scripts/python -m alembic upgrade head
-../.venv/Scripts/python -m uvicorn app.main:app --reload --port 8000
+../.venv/Scripts/python -m uvicorn app.main:app --reload --port 8000 --no-proxy-headers --no-access-log
 
 # Frontend
 cd frontend && npm install && npm run dev   # http://localhost:3000
@@ -123,7 +311,7 @@ cd ../frontend && npm run typecheck && npm run build         # TSC OK, build OK
 
 ```bash
 # with the compose Postgres running:
-docker compose up -d db
+docker compose --env-file backend/.env up -d db
 cd backend
 DATABASE_URL=postgresql+asyncpg://cinemind:cinemind@localhost:5432/cinemind \
   ../.venv/Scripts/python -m alembic upgrade head   # once
@@ -133,9 +321,9 @@ DATABASE_URL=postgresql+asyncpg://cinemind:cinemind@localhost:5432/cinemind \
   ../.venv/Scripts/python -m app.services.ingestion --pages 2
 
 # verify (expected ~380-400 rows: 2 pages × 20 movies × 2 lists, deduped):
-docker compose exec db psql -U cinemind -d cinemind \
+docker compose --env-file backend/.env exec db psql -U cinemind -d cinemind \
   -c "SELECT count(*) FROM movies;"
-docker compose exec db psql -U cinemind -d cinemind \
+docker compose --env-file backend/.env exec db psql -U cinemind -d cinemind \
   -c "SELECT tmdb_id, title, release_year, genres FROM movies ORDER BY popularity DESC NULLS LAST LIMIT 5;"
 ```
 
@@ -174,12 +362,12 @@ snapshots.
 **Verify against the Docker Postgres:**
 
 ```bash
-docker compose up -d db
+docker compose --env-file backend/.env up -d db
 cd backend && DATABASE_URL=postgresql+asyncpg://cinemind:cinemind@localhost:5432/cinemind \
   ../.venv/Scripts/python -m alembic upgrade head
 cd ..
-docker compose exec db psql -U cinemind -d cinemind -c '\d movies'
-docker compose exec db psql -U cinemind -d cinemind -c '\di'
+docker compose --env-file backend/.env exec db psql -U cinemind -d cinemind -c '\d movies'
+docker compose --env-file backend/.env exec db psql -U cinemind -d cinemind -c '\di'
 ```
 
 `\d movies` should list the vector column (`vector(1536)`) and the three
@@ -213,12 +401,12 @@ DATABASE_URL=postgresql+asyncpg://cinemind:cinemind@localhost:5432/cinemind \
   ../.venv/Scripts/python -m app.services.embeddings --backfill
 
 # Deliverable check — should match total movie count:
-docker compose exec db psql -U cinemind -d cinemind \
+docker compose --env-file backend/.env exec db psql -U cinemind -d cinemind \
   -c "SELECT count(*) FILTER (WHERE embedding IS NOT NULL) AS embedded, count(*) AS total FROM movies;"
 
 # Sanity check: Interstellar vs Arrival should score far higher than a
 # tonally unrelated movie (adjust titles to what you ingested):
-docker compose exec db psql -U cinemind -d cinemind -c "
+docker compose --env-file backend/.env exec db psql -U cinemind -d cinemind -c "
 SELECT 1 - (a.embedding <=> b.embedding) AS interstellar_vs_arrival,
        1 - (a.embedding <=> c.embedding) AS interstellar_vs_hangover
 FROM movies a, movies b, movies c

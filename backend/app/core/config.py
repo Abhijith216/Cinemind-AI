@@ -6,6 +6,8 @@ copy ``backend/.env.example`` to ``backend/.env`` and fill in real values.
 """
 
 from functools import lru_cache
+from pathlib import Path
+from typing import Literal
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -30,9 +32,7 @@ def _to_asyncpg_url(url: str) -> str:
     if "?" in url:
         base, _, query = url.partition("?")
         kept = "&".join(
-            part
-            for part in query.split("&")
-            if not part.startswith(_LIBPQ_ONLY_PARAMS)
+            part for part in query.split("&") if not part.startswith(_LIBPQ_ONLY_PARAMS)
         )
         url = f"{base}?{kept}" if kept else base
     return url
@@ -42,7 +42,12 @@ class Settings(BaseSettings):
     """Typed application settings (see backend/.env.example for documentation)."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # Resolve local configuration independently of the launch directory.
+        # Backend-specific values override the shared local database settings.
+        env_file=(
+            Path(__file__).resolve().parents[3] / ".env.local",
+            Path(__file__).resolve().parents[2] / ".env",
+        ),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -56,7 +61,8 @@ class Settings(BaseSettings):
     database_url_direct: str = ""
     # TLS for the app's async connections. "require" matches Neon/Supabase and
     # most managed Postgres; "disable" for local docker-compose Postgres.
-    db_ssl: str = "disable"
+    # "auto" requires TLS for hosts outside localhost and the compose db.
+    db_ssl: Literal["auto", "require", "disable"] = "auto"
 
     @field_validator("database_url", "database_url_direct")
     @classmethod
@@ -76,18 +82,26 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     llm_model: str = "gpt-4o-mini"
+    llm_structured_outputs: bool = False
+    llm_disable_reasoning: bool = False
     embedding_model: str = "text-embedding-3-large"
     embedding_dimensions: int = 1536
+
+    @field_validator("openai_api_key", "openai_base_url", "llm_model", "tmdb_api_key")
+    @classmethod
+    def strip_provider_settings(cls, value: str) -> str:
+        return value.strip()
 
     # --- Server ---
     host: str = "0.0.0.0"
     port: int = 8000
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # --- Rate limiting (per client per minute; 0 disables — set 0 for local
     # demo/offline use, a real number whenever an API budget is at stake) ---
     chat_rate_limit_per_minute: int = 10
     search_rate_limit_per_minute: int = 30
+    rate_limit_backend: Literal["memory", "database"] = "memory"
 
     # --- Observability ---
     # "human" (readable) or "json" (one JSON object per stdout line — use in

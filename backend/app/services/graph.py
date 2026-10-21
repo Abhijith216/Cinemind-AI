@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Movie, Rating
 from app.schemas.graph import GraphEdge, GraphMovie, RecommendationGraph
+from app.services.taste_profile import LIKED_THRESHOLD
 
 _MAX_RATED_MOVIES = 5
 
@@ -55,34 +56,42 @@ async def build_recommendation_graph(
         )
 
     rows = (
-        (
-            await session.execute(
-                select(Movie, Rating.score)
-                .join(Rating, Rating.movie_id == Movie.id)
-                .where(
-                    Rating.user_id == user_id,
-                    Rating.movie_id != movie.id,
-                )
-                .order_by(Rating.score.desc())
-                .limit(_MAX_RATED_MOVIES)
+        await session.execute(
+            select(Movie, Rating.score)
+            .join(Rating, Rating.movie_id == Movie.id)
+            .where(
+                Rating.user_id == user_id,
+                Rating.movie_id != movie.id,
+                Rating.score >= LIKED_THRESHOLD,
             )
+            .order_by(Rating.score.desc(), Rating.rated_at.desc(), Movie.id)
         )
-        .all()
-    )
+    ).all()
 
     rated_movies: list[GraphMovie] = []
     edges: list[GraphEdge] = []
     for rated_movie, score in rows:
+        shared_genres = _shared(movie.genres, rated_movie.genres)
+        shared_keywords = _shared(movie.keywords, rated_movie.keywords)
+        if score < LIKED_THRESHOLD or not (shared_genres or shared_keywords):
+            continue
         rated_movies.append(_node(rated_movie, float(score)))
         edges.append(
             GraphEdge(
                 to_movie_id=rated_movie.id,
-                shared_genres=_shared(movie.genres, rated_movie.genres),
-                shared_keywords=_shared(movie.keywords, rated_movie.keywords),
+                shared_genres=shared_genres,
+                shared_keywords=shared_keywords,
             )
         )
+        if len(rated_movies) == _MAX_RATED_MOVIES:
+            break
 
-    note = None if rated_movies else "This user has not rated any movies yet."
+    note = (
+        None
+        if rated_movies
+        else "No shared genres or themes with movies you rated 7 or higher yet. "
+        "Rate more movies you enjoyed to find connections."
+    )
     return RecommendationGraph(
         movie=_node(movie), rated_movies=rated_movies, edges=edges, note=note
     )

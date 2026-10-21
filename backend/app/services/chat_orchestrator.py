@@ -20,13 +20,14 @@ full orchestration offline; production wires the real modules by default.
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import re
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChatMessage, ChatSession
@@ -47,29 +48,62 @@ SearchFn = Callable[
     Awaitable[list[RankedMovie]],
 ]
 ExplainFn = Callable[[Any, QueryIntent | None, Any], Awaitable[Any]]
+IntentSearchFn = Callable[
+    [AsyncSession, QueryIntent, uuid.UUID | None, int],
+    Awaitable[list[RankedMovie]],
+]
+
+
+def release_window(period: str | None) -> tuple[int | None, int | None]:
+    if not period:
+        return None, None
+    text = period.strip().lower()
+    if text in {"recent", "modern", "latest", "new"}:
+        return datetime.date.today().year - 5, None
+    decade = re.fullmatch(r"(\d{4})s", text)
+    if decade and 1880 <= int(decade[1]) <= 2090:
+        return int(decade[1]), int(decade[1]) + 9
+    years = re.fullmatch(r"(?:from\s+)?(\d{4})\s*(?:-|–|to|and)\s*(\d{4})", text)
+    if years and 1888 <= int(years[1]) <= int(years[2]) <= 2099:
+        return int(years[1]), int(years[2])
+    if re.fullmatch(r"\d{4}", text) and 1888 <= int(text) <= 2099:
+        return int(text), int(text)
+    return None, None
+
+
+def constraint_notices(intent: QueryIntent) -> list[str]:
+    notices = []
+    if intent.pace:
+        notices.append(
+            "Pacing isn't verified for these films, so I couldn't apply your pace preference."
+        )
+    if intent.violence_tolerance:
+        notices.append(
+            "Scene-level violence isn't verified. These picks aren't guaranteed to meet your "
+            "violence preference; check a content guide before watching."
+        )
+    if intent.ending_type:
+        notices.append("Ending preferences use theme matches; the films' endings aren't verified.")
+    if intent.time_period and release_window(intent.time_period) == (None, None):
+        notices.append("I couldn't apply that release period. Try a year, decade, or year range.")
+    return notices
 
 
 def _filters_from_intent(intent: QueryIntent) -> SearchFilters:
     """Map intent fields onto the hard SQL filters retrieval supports.
 
     ``genres_include`` become genre filters; ``time_period`` like "1990s"
-    (or "recent") becomes a release-year window. ``runtime_max`` has no SQL
-    filter yet — it stays in the intent for the LLM/explanation stages.
+    (or "recent") becomes a release-year window. Runtime and exclusions
+    are enforced during retrieval.
     """
-    year_min: int | None = None
-    year_max: int | None = None
-    if intent.time_period:
-        decade_match = re.search(r"(\d{4})s", intent.time_period.lower())
-        if decade_match:
-            decade = int(decade_match.group(1))
-            if 1900 <= decade <= 2090:
-                year_min, year_max = decade, decade + 9
-        elif "recent" in intent.time_period.lower():
-            year_min = 2020
+    year_min, year_max = release_window(intent.time_period)
     return SearchFilters(
         genres=list(intent.genres_include),
         min_release_year=year_min,
         max_release_year=year_max,
+        max_runtime=intent.runtime_max,
+        excluded_genres=list(intent.genres_exclude),
+        excluded_themes=list(intent.themes_exclude),
     )
 
 
@@ -92,19 +126,19 @@ def render_intent_text(intent: QueryIntent) -> str:
     return ", ".join(parts) or "movies"
 
 
-def build_conversational_reply(
-    intent: QueryIntent, results: list[RankedMovie]
-) -> str:
+def build_conversational_reply(intent: QueryIntent, results: list[RankedMovie]) -> str:
     """Short deterministic summary of the picks (grounded in real intent).
 
     Deliberately template-based: the per-movie LLM explanations carry the
     nuance, so the summary stays honest and cheap.
     """
+    notices = constraint_notices(intent)
     if not results:
-        return (
+        summary = (
             "I could not find matching movies in the catalog for that yet. "
             "Try widening the request — fewer exclusions or a broader genre."
         )
+        return "\n\n".join([summary, *notices])
     bits: list[str] = []
     if intent.genres_include:
         bits.append(", ".join(intent.genres_include))
@@ -114,20 +148,33 @@ def build_conversational_reply(
         bits.append(f"a {intent.mood} mood")
     focus = f" ({'; '.join(bits)})" if bits else ""
     top_title = results[0].movie.title or "the top pick"
-    return (
+    summary = (
         f"Here are {len(results)} picks{focus}. Top pick: {top_title} — "
         "why each one fits is noted under it."
-    )[:1000]
+    )[:600]
+    return "\n\n".join([summary, *notices])
 
 
 async def _load_history(session: AsyncSession, session_id: uuid.UUID) -> list[dict[str, str]]:
     statement = (
         select(ChatMessage)
         .where(ChatMessage.session_id == session_id)
-        .order_by(ChatMessage.created_at)
+        .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
+        .limit(12)
     )
     rows = (await session.execute(statement)).scalars().all()
-    return [{"role": message.role, "content": message.content} for message in rows]
+    return [
+        {
+            "role": message.role,
+            "content": message.content
+            + (
+                "\nResolved movie request: " + json.dumps(message.intent, ensure_ascii=False)
+                if message.intent
+                else ""
+            ),
+        }
+        for message in reversed(rows)
+    ]
 
 
 async def _add_message(
@@ -153,6 +200,12 @@ async def _add_message(
             created_at=datetime.datetime.now(datetime.UTC),
         )
     )
+    if role == "assistant":
+        await session.execute(
+            update(ChatSession)
+            .where(ChatSession.id == session_id)
+            .values(updated_at=datetime.datetime.now(datetime.UTC))
+        )
 
 
 async def handle_chat_message(
@@ -166,6 +219,7 @@ async def handle_chat_message(
     embed_query_fn: EmbedFn,
     hybrid_search_fn: SearchFn,
     explain_fn: ExplainFn,
+    intent_search_fn: IntentSearchFn | None = None,
 ) -> ChatTurnResponse:
     """Run one conversation turn end to end and persist it."""
     # 1) Load or create the conversation session.
@@ -176,11 +230,12 @@ async def handle_chat_message(
             raise LookupError(f"chat session {session_id} not found")
     if chat_session is None:
         chat_session = ChatSession(id=uuid.uuid4(), user_id=user_id)
-        session.add(chat_session)
     active_session_id = chat_session.id
 
-    history = await _load_history(session, active_session_id)
-    await _add_message(session, active_session_id, role="user", content=message)
+    history = await _load_history(session, active_session_id) if session_id is not None else []
+    # Release the read transaction while waiting on the external AI provider.
+    # Do not flush a new session or user message until interpretation succeeds.
+    await session.rollback()
 
     # 2) Intent with conversational context.
     try:
@@ -188,9 +243,12 @@ async def handle_chat_message(
     except AmbiguousQueryError as ambiguous:
         # 3) Clarification IS the reply — no search yet.
         question = ambiguous.question
+        if session_id is None:
+            session.add(chat_session)
+        await _add_message(session, active_session_id, role="user", content=message)
         await _add_message(session, active_session_id, role="assistant", content=question)
         await session.commit()
-        logger.info("session %s: clarifying question returned", active_session_id)
+        logger.info("Chat clarification persisted")
         return ChatTurnResponse(
             session_id=active_session_id,
             reply=question,
@@ -199,16 +257,20 @@ async def handle_chat_message(
             results=[],
         )
 
+    if session_id is None:
+        session.add(chat_session)
+    await _add_message(session, active_session_id, role="user", content=message)
+    logger.info("Chat intent interpreted with %d reference titles", len(intent.similar_to))
     # 4) Search + grounded explanations for the resolved intent.
     filters = _filters_from_intent(intent)
-    query_embedding = await embed_query_fn(render_intent_text(intent))
-    ranked = await hybrid_search_fn(
-        session, query_embedding, filters, user_id, result_limit
-    )
+    if intent_search_fn is not None:
+        ranked = await intent_search_fn(session, intent, user_id, result_limit)
+    else:
+        query_embedding = await embed_query_fn(render_intent_text(intent))
+        ranked = await hybrid_search_fn(session, query_embedding, filters, user_id, result_limit)
     taste_context = await build_user_taste_context(session, user_id)
-    explanations = [
-        await explain_fn(item.movie, intent, taste_context) for item in ranked
-    ]
+    logger.info("Chat catalog returned %d movies", len(ranked))
+    explanations = [await explain_fn(item.movie, intent, taste_context) for item in ranked]
 
     reply = build_conversational_reply(intent, ranked)
 
@@ -223,11 +285,8 @@ async def handle_chat_message(
     )
     await session.commit()
     logger.info(
-        "session %s: %d results for intent (mood=%s, genres=%s)",
-        active_session_id,
+        "Chat response persisted with %d results",
         len(ranked),
-        intent.mood,
-        intent.genres_include,
     )
 
     return ChatTurnResponse(

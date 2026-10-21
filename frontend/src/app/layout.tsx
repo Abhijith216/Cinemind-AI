@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { GeistSans } from "geist/font/sans";
 import Link from "next/link";
 
 import { AuthProvider } from "@/components/auth-provider";
@@ -6,46 +7,37 @@ import { SiteNav } from "@/components/site-nav";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "CineMind — explainable movie discovery",
-  description:
-    "Describe the movie you're in the mood for; CineMind explains why each pick fits.",
+  title: "CineMind — movie discovery with reasons",
+  description: "Find a film that fits the moment. CineMind explains why every pick belongs.",
 };
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className={`dark ${GeistSans.variable}`}>
       <body className="beam grain min-h-screen antialiased">
         <div className="relative z-10 flex min-h-screen flex-col">
           <AuthProvider>
             <SiteNav />
-            <main className="flex-1">{children}</main>
+            <main className="w-full max-w-full flex-1 overflow-x-clip">{children}</main>
           </AuthProvider>
-          <footer className="border-t border-border/60 py-6 text-center text-xs text-muted-foreground">
-            CineMind — every pick comes with its reasons. ·{" "}
-            <Link
-              href="http://localhost:8000/docs"
-              target="_blank"
-              className="underline-offset-4 hover:underline"
-            >
-              API docs
-            </Link>
+          <footer className="border-t cinema-rule py-10 text-sm text-muted-foreground">
+            <div className="cinema-shell flex flex-col justify-between gap-6 sm:flex-row sm:items-start">
+              <div>
+                <p className="font-semibold tracking-tight text-foreground">Cine<span className="text-primary">Mind</span></p>
+                <p className="mt-2 max-w-xs text-xs leading-relaxed">Find a film that fits. Know why it belongs.</p>
+              </div>
+              <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs">
+                <Link href="/" className="hover:text-foreground">Discover</Link>
+                <Link href="/chat" className="hover:text-foreground">Chat</Link>
+                <Link href="/profile" className="hover:text-foreground">My Taste</Link>
+                <Link href="https://www.themoviedb.org/" target="_blank" rel="noreferrer" className="hover:text-foreground">Movie data from TMDB</Link>
+              </div>
+            </div>
+            <p className="cinema-shell mt-7 text-[11px]">This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
           </footer>
         </div>
-        {/* Ambient art: projector glow + reel silhouette, behind content. */}
-        <div
-          aria-hidden
-          className="pointer-events-none fixed inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background to-transparent"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none fixed left-1/2 top-0 h-[420px] w-[820px] -translate-x-1/2 rounded-full bg-glow/10 blur-3xl"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none fixed left-1/2 top-[-140px] h-[380px] w-[380px] -translate-x-1/2 rounded-full border border-neon/20"
-        />
       </body>
     </html>
   );

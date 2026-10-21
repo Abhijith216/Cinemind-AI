@@ -6,6 +6,8 @@ export interface MovieCardData {
   movieId: string;
   title: string;
   year?: number | null;
+  runtime?: number | null;
+  overview?: string | null;
   rating?: number | null;
   posterUrl?: string | null;
   explanation?: string | null;

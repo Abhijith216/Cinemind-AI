@@ -69,11 +69,11 @@ function buildSeries(snapshots: TasteSnapshotOut[]): {
     const point: ChartPoint = { month: snapshot.month, label: monthLabel(snapshot.month) };
     snapshot.dominant_genres.forEach((tag, index) => {
       if (!genres.includes(tag)) genres.push(tag);
-      point[tag] = rankToInfluence(index + 1);
+      point[`genre:${tag}`] = rankToInfluence(index + 1);
     });
     snapshot.dominant_themes.forEach((tag, index) => {
       if (!themes.includes(tag)) themes.push(tag);
-      point[tag] = rankToInfluence(index + 1);
+      point[`theme:${tag}`] = rankToInfluence(index + 1);
     });
     return point;
   });
@@ -86,7 +86,7 @@ export function TasteEvolutionChart({ snapshots }: TasteEvolutionChartProps) {
   if (snapshots.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border/60 p-10 text-center text-sm text-muted-foreground">
-        No taste history yet — rate a few movies and run the monthly snapshot job.
+        No taste history yet — rate a movie you enjoyed 7 or higher to start.
       </div>
     );
   }
@@ -123,7 +123,8 @@ export function TasteEvolutionChart({ snapshots }: TasteEvolutionChartProps) {
                 <Line
                   key={tag}
                   type="monotone"
-                  dataKey={tag}
+                  dataKey={`genre:${tag}`}
+                  name={tag}
                   stroke={GENRE_STROKES[index % GENRE_STROKES.length]}
                   strokeWidth={2}
                   connectNulls
@@ -161,7 +162,8 @@ export function TasteEvolutionChart({ snapshots }: TasteEvolutionChartProps) {
                 <Line
                   key={tag}
                   type="monotone"
-                  dataKey={tag}
+                  dataKey={`theme:${tag}`}
+                  name={tag}
                   stroke={THEME_STROKES[index % THEME_STROKES.length]}
                   strokeWidth={2}
                   strokeDasharray="6 3"

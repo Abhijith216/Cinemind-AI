@@ -7,7 +7,7 @@ from fastapi.security.utils import get_authorization_scheme_param
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.db import get_db_session
+from app.core.db import ensure_database_connection, get_db_session
 from app.core.security import (
     create_access_token,
     create_password_hash,
@@ -39,6 +39,7 @@ async def get_current_user(
         user_id = decode_access_token(param)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+    await ensure_database_connection(db)
     user = await db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=401, detail="unknown user")
@@ -62,7 +63,7 @@ async def register(
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    logger.info("registered user %s", user.email)
+    logger.info("Account registered")
     return TokenResponse(
         access_token=create_access_token(user.id),
         user=UserOut.model_validate(user),

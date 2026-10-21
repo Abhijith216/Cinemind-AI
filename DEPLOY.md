@@ -41,7 +41,7 @@ Render                          Neon (external)
 - The blueprint in [render.yaml](render.yaml) defines both services.
 - Migrations run automatically on every backend boot (the container
   entrypoint runs `alembic upgrade head` before starting uvicorn).
-- The backend health check (`/health`) drives Render's monitoring and
+- The backend readiness check (`/ready`) drives Render's monitoring and
   restarts the service if it stops answering.
 
 ---
@@ -71,7 +71,7 @@ Render                          Neon (external)
    - `DATABASE_URL` — Neon **pooled** URL
    - `DATABASE_URL_DIRECT` — Neon **direct** URL
    - `TMDB_API_KEY` — your TMDb key
-   - `OPENAI_API_KEY` — your OpenAI key
+   - `OPENAI_API_KEY` — your OpenRouter key (the blueprint uses OpenRouter/free)
    - `CORS_ORIGINS` — leave `https://cinemind-web.onrender.com` for now
      (fix up in step 4 once you know your real frontend URL)
    - `NEXT_PUBLIC_API_BASE_URL` — leave blank for now (step 4)
@@ -135,10 +135,14 @@ export OPENAI_API_KEY=...                        # ← replace
 ### 6a. Ingest the movie catalog (TMDb)
 
 ```bash
-python -m app.services.ingestion --pages 20
-# ~15-20 min for 20 pages (~400 movies). Safe to Ctrl-C and re-run:
-# upserts by tmdb_id, so nothing duplicates.
+python -m app.services.catalog_refresh --limit 6000 --pages 15
+# Safe to interrupt and resume: committed batches are skipped while fresh.
+# Schedule a daily one-shot job, or use a dedicated background worker:
+python -m app.services.catalog_refresh --limit 1000 --pages 10 --interval-hours 24
 ```
+
+See [CATALOG_REFRESH.md](CATALOG_REFRESH.md) for operation and failure reporting.
+The web service itself does not schedule this job.
 
 ### 6b. Generate embeddings
 
@@ -201,18 +205,19 @@ Full list with local defaults: [backend/.env.example](backend/.env.example),
 
 ## 8. Monitoring & health
 
-- **Health check**: `GET /health` (also `/api/health`) returns
-  `{status, version, database, uptime_seconds, timestamp}` — HTTP 200 even
-  when the DB is down (`database: "down"`), so the container reports
-  liveness separately from DB health. Render pings it every 30s (free tier:
-  on-demand) and restarts the service if it fails.
+- **Readiness**: `GET /ready` (also `/api/ready`) returns HTTP 200 only when
+  the required database schema is reachable, and HTTP 503 otherwise. Docker
+  and Render health checks use this route. The probe has a three-second deadline;
+  a cold database may need another probe before becoming ready.
+- **Liveness**: `GET /health` (also `/api/health`) retains HTTP 200 during
+  database outages and reports `database: "down"` for diagnostics.
 - **Logs**: `LOG_FORMAT=json` emits one queryable JSON object per line —
-  every request logged with `method`, `path`, `status`, `duration_ms`.
+  every request logged with `method`, route-template `path`, `status`, `duration_ms`.
+  Private record IDs and anonymous conversation capabilities are not included.
   Health-check polls are excluded from the access log.
 - **Uptime alerts**: Render dashboard → service → **Alerts** → email on
   failed deploys / health-check failures. For uptime-from-outside, add the
-  free [UptimeRobot](https://uptimerobot.com) monitor on `/health`
-  (this also keeps a free-tier service from sleeping).
+  an external monitor on `/ready`.
 - **Metrics**: Render's **Metrics** tab shows CPU/memory per service; Neon's
   dashboard shows query latency, storage, and autosuspend activity.
 

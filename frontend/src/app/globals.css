@@ -82,6 +82,58 @@ body {
   font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
 }
 
+/* CineMind's editorial screening-room layer. */
+:root,
+.dark {
+  --background: 300 5% 4%;
+  --foreground: 38 30% 94%;
+  --card: 300 5% 7%;
+  --card-foreground: 38 30% 94%;
+  --primary: 35 83% 66%;
+  --primary-foreground: 300 8% 8%;
+  --secondary: 300 5% 13%;
+  --secondary-foreground: 38 20% 91%;
+  --muted-foreground: 35 9% 68%;
+  --border: 35 12% 20%;
+  --input: 35 12% 20%;
+  --ring: 35 83% 66%;
+  --glow: 35 83% 66%;
+  --neon: 276 31% 69%;
+  --radius: 1rem;
+}
+
+html { scroll-behavior: smooth; }
+body { font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif; }
+::selection { background: hsl(var(--primary) / .32); color: hsl(var(--foreground)); }
+
+.cinema-shell { width: min(calc(100% - 3rem), 82rem); margin-inline: auto; }
+.cinema-display { letter-spacing: -.055em; line-height: .97; font-weight: 600; }
+.cinema-surface { background: linear-gradient(145deg, hsl(var(--card) / .96), hsl(var(--background) / .9)); border: 1px solid hsl(var(--border) / .9); }
+.cinema-eyebrow { color: hsl(var(--primary)); font-size: .73rem; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; }
+.cinema-hero {
+  background-image: linear-gradient(90deg, rgba(9,8,9,.97) 0%, rgba(9,8,9,.83) 30%, rgba(9,8,9,.26) 70%, rgba(9,8,9,.08) 100%), linear-gradient(0deg, #0b0a0b 0%, transparent 48%), url('/cinema-hero.webp');
+  background-position: center, center, center;
+  background-size: cover;
+}
+.cinema-card-image { transition: transform .7s ease, filter .7s ease; }
+.group:hover .cinema-card-image { transform: scale(1.05); }
+.cinema-rule { border-color: hsl(var(--border) / .72); }
+.text-rotate { display: inline-flex; position: relative; white-space: pre; vertical-align: baseline; }
+.text-rotate-word { display: inline-flex; overflow: hidden; padding-bottom: .08em; margin-bottom: -.08em; }
+.text-rotate-element { display: inline-block; }
+.text-rotate-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+@media (max-width: 640px) {
+  .cinema-shell { width: min(calc(100% - 2rem), 82rem); }
+  .cinema-hero { background-image: linear-gradient(90deg, rgba(9,8,9,.95), rgba(9,8,9,.66)), linear-gradient(0deg, #0b0a0b, transparent 70%), url('/cinema-hero.webp'); background-position: center, center, 58% center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+  .cinema-card-image, .group:hover .cinema-card-image { transform: none; }
+  .cinema-stack-card { position: static !important; opacity: 1 !important; transform: none !important; }
+}
+
 /* The "projection beam": a soft golden light falling from the top of every
    page, like sitting under a projector in a dark theater. */
 .beam::before {

@@ -5,6 +5,9 @@ import uuid
 
 from pydantic import BaseModel, Field
 
+from app.schemas.common import MovieOut
+from app.schemas.explanation import MatchedAttributes
+
 
 class RatingCreate(BaseModel):
     """Body of POST /ratings."""
@@ -43,3 +46,31 @@ class TasteSnapshotOut(BaseModel):
     dominant_genres: list[str] = Field(default_factory=list)
     dominant_themes: list[str] = Field(default_factory=list)
     created_at: datetime.datetime | None = None
+
+
+class RatedMovieOut(BaseModel):
+    id: uuid.UUID
+    movie: MovieOut
+    score: int
+    rated_at: datetime.datetime
+
+
+class RatingHistoryOut(BaseModel):
+    items: list[RatedMovieOut]
+    total: int
+    offset: int
+    limit: int
+
+
+class TasteRecommendationOut(MovieOut):
+    explanation: str
+    matched_attributes: MatchedAttributes
+    preference_score: float
+
+
+class TasteDashboardOut(BaseModel):
+    profile: TasteProfileOut | None
+    total_ratings: int
+    average_score: float | None
+    ratings: list[RatedMovieOut]
+    recommendations: list[TasteRecommendationOut]

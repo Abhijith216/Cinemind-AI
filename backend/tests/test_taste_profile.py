@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.db import get_db_session
+from app.core.security import create_access_token
 from app.main import app
 from app.models import Movie, Rating, TasteSnapshot, User, UserTasteProfile
 from app.schemas.taste import TasteProfileOut
@@ -68,15 +69,26 @@ class FakeSession:
         for obj in self.added:
             if isinstance(obj, model):
                 obj_key = (
-                    obj.user_id
-                    if isinstance(obj, UserTasteProfile)
-                    else getattr(obj, "id", None)
+                    obj.user_id if isinstance(obj, UserTasteProfile) else getattr(obj, "id", None)
                 )
                 if obj_key == key:
                     return obj
         return None
 
     async def execute(self, _statement: Any) -> Any:
+        sql = str(_statement)
+        if "FOR UPDATE" in sql:
+            return _RowsResult([])
+        if sql.startswith("SELECT movies.id") and "JOIN ratings" in sql:
+            objects = [*self.objects.values(), *self.added]
+            movies = {movie.id: movie for movie in objects if isinstance(movie, Movie)}
+            return _RowsResult(
+                [
+                    (movies[rating.movie_id], rating.score)
+                    for rating in objects
+                    if isinstance(rating, Rating)
+                ]
+            )
         if not self.execute_results:
             raise AssertionError("unexpected execute() call")
         return self.execute_results.pop(0)
@@ -86,6 +98,12 @@ class FakeSession:
 
     async def commit(self) -> None:
         self.commits += 1
+
+    async def connection(self) -> None:
+        pass
+
+    async def flush(self) -> None:
+        pass
 
 
 def _movie(**kwargs: Any) -> Movie:
@@ -268,10 +286,7 @@ def test_compute_dominant_tie_breaks_by_count_then_name() -> None:
 
 
 def test_compute_dominant_caps_at_five() -> None:
-    many = [
-        MonthRating(genres=[f"genre-{index}"], keywords=[], score=5)
-        for index in range(8)
-    ]
+    many = [MonthRating(genres=[f"genre-{index}"], keywords=[], score=5) for index in range(8)]
     genres, _ = compute_dominant(many)
     assert len(genres) == MAX_DOMINANT_ITEMS
 
@@ -360,6 +375,10 @@ def _override(session: FakeSession) -> None:
     app.dependency_overrides[get_db_session] = _yield_session
 
 
+def _auth(user_id: uuid.UUID) -> dict[str, str]:
+    return {"Authorization": f"Bearer {create_access_token(user_id)}"}
+
+
 def test_ratings_and_profile_routes_are_registered(api: Any) -> None:
     schema = api.get("/openapi.json").json()
     assert "/api/ratings" in schema["paths"]
@@ -376,6 +395,7 @@ def test_post_rating_creates_rating_and_profile(api: Any) -> None:
 
     response = api.post(
         "/api/ratings",
+        headers=_auth(user.id),
         json={
             "user_id": str(user.id),
             "movie_id": str(movie.id),
@@ -402,12 +422,13 @@ def test_post_rating_upserts_existing(api: Any) -> None:
         score=4,
         rated_at=datetime.datetime(2026, 9, 1, tzinfo=datetime.UTC),
     )
-    session.register(user, movie)
+    session.register(user, movie, rating)
     session.execute_results = [_GetResult(rating)]
     _override(session)
 
     response = api.post(
         "/api/ratings",
+        headers=_auth(user.id),
         json={"user_id": str(user.id), "movie_id": str(movie.id), "score": 8},
     )
 
@@ -426,23 +447,28 @@ def test_post_rating_rejects_unknown_user_and_movie(api: Any) -> None:
         "/api/ratings",
         json={"user_id": str(uuid.uuid4()), "movie_id": str(movie.id), "score": 5},
     )
-    assert missing_user.status_code == 404
+    assert missing_user.status_code == 401
 
     user = User(id=uuid.uuid4(), email="t@t.dev", hashed_password="x")
     session.register(user)
     session.execute_results = []
     missing_movie = api.post(
         "/api/ratings",
+        headers=_auth(user.id),
         json={"user_id": str(user.id), "movie_id": str(uuid.uuid4()), "score": 5},
     )
     assert missing_movie.status_code == 404
 
 
 def test_post_rating_validates_score_range(api: Any) -> None:
-    _override(FakeSession())
+    session = FakeSession()
+    user = User(id=uuid.uuid4(), email="t@t.dev", hashed_password="x")
+    session.register(user)
+    _override(session)
     response = api.post(
         "/api/ratings",
-        json={"user_id": str(uuid.uuid4()), "movie_id": str(uuid.uuid4()), "score": 11},
+        headers=_auth(user.id),
+        json={"user_id": str(user.id), "movie_id": str(uuid.uuid4()), "score": 11},
     )
     assert response.status_code == 422
 
@@ -458,6 +484,7 @@ def test_get_taste_profile_round_trip(api: Any) -> None:
 
     created = api.post(
         "/api/ratings",
+        headers=_auth(user_id),
         json={"user_id": str(user_id), "movie_id": str(movie.id), "score": 9},
     )
     assert created.status_code == 201
@@ -466,7 +493,7 @@ def test_get_taste_profile_round_trip(api: Any) -> None:
     profile = next(obj for obj in session.added if isinstance(obj, UserTasteProfile))
     session.register(profile)
 
-    fetched = api.get(f"/api/users/{user_id}/taste-profile")
+    fetched = api.get(f"/api/users/{user_id}/taste-profile", headers=_auth(user_id))
     assert fetched.status_code == 200
     assert "Science Fiction" in fetched.json()["likes"]
     assert fetched.json()["favorite_themes"] == ["first contact", "time"]
@@ -476,14 +503,13 @@ def test_get_taste_profile_404_without_profile(api: Any) -> None:
     session = FakeSession()
     _override(session)
 
-    # Unknown user → "user not found".
+    # Account data requires authentication, including unknown IDs.
     unknown = api.get(f"/api/users/{uuid.uuid4()}/taste-profile")
-    assert unknown.status_code == 404
-    assert "user not found" in unknown.json()["detail"]
+    assert unknown.status_code == 401
 
     # Registered user who never rated → "rate a movie first".
     user = User(id=uuid.uuid4(), email="t@t.dev", hashed_password="x")
     session.register(user)
-    response = api.get(f"/api/users/{user.id}/taste-profile")
+    response = api.get(f"/api/users/{user.id}/taste-profile", headers=_auth(user.id))
     assert response.status_code == 404
     assert "rate a movie first" in response.json()["detail"]

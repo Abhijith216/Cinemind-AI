@@ -39,9 +39,7 @@ class FakeChatClient:
         schema_model: type[QueryIntent],
         history: Any = (),
     ) -> QueryIntent:
-        self.calls.append(
-            {"system": system_prompt, "user": user_prompt, "history": history}
-        )
+        self.calls.append({"system": system_prompt, "user": user_prompt, "history": history})
         response = self._responses.pop(0)
         if isinstance(response, Exception):
             raise response
@@ -49,6 +47,37 @@ class FakeChatClient:
 
     async def aclose(self) -> None:
         return None
+
+
+@pytest.mark.parametrize("message", ["hey", "Hey!", "hi there", "  HELLO?! ", "Good evening"])
+async def test_greetings_do_not_require_a_provider(
+    message: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unavailable() -> None:
+        pytest.fail("Greetings must not create an external AI client")
+
+    monkeypatch.setattr("app.services.query_understanding.create_chat_client", unavailable)
+    with pytest.raises(AmbiguousQueryError) as error:
+        await parse_query(message)
+    assert "What kind of movie" in error.value.question
+
+
+@pytest.mark.parametrize("message", ["Hey, find a thriller", "Hey Arnold! The Movie", "High Life"])
+async def test_greeting_prefix_does_not_hide_movie_requests(message: str) -> None:
+    client = FakeChatClient([{"genres_include": ["Thriller"]}])
+    intent = await parse_query(message, client=client)  # type: ignore[arg-type]
+    assert intent.genres_include == ["Thriller"]
+    assert len(client.calls) == 1
+
+
+async def test_reference_titles_must_come_from_user_history() -> None:
+    client = FakeChatClient([{"similar_to": ["Interstellar", "Invented Recommendation"]}])
+    intent = await parse_query(
+        "Make it shorter",
+        [{"role": "user", "content": "Something like Interstellar"}],
+        client=client,  # type: ignore[arg-type]
+    )
+    assert intent.similar_to == ["Interstellar"]
 
 
 def interstellar_intent() -> dict[str, Any]:
@@ -76,8 +105,7 @@ async def test_specific_request_like_interstellar_but_not_space() -> None:
     client = FakeChatClient([interstellar_intent()])
 
     intent = await parse_query(
-        "something like Interstellar but not about space, emotional, "
-        "mind-blowing ending",
+        "something like Interstellar but not about space, emotional, mind-blowing ending",
         client=client,  # type: ignore[arg-type]
     )
 
@@ -360,9 +388,7 @@ def test_client_raises_on_permanent_error() -> None:
     )
 
     async def run() -> None:
-        await client.complete_json(
-            system_prompt="s", user_prompt="u", schema_model=QueryIntent
-        )
+        await client.complete_json(system_prompt="s", user_prompt="u", schema_model=QueryIntent)
 
     with pytest.raises(LLMError):
         asyncio.run(run())

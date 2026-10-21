@@ -3,6 +3,32 @@
 from app.core.config import Settings, _to_asyncpg_url
 
 
+def test_auto_tls_and_explicit_local_override(monkeypatch) -> None:
+    from app.core.db import engine_kwargs
+
+    for host, mode, expected_tls in [
+        ("remote.example", "auto", True),
+        ("localhost", "auto", False),
+        ("db", "auto", False),
+        ("remote.example", "disable", False),
+        ("localhost", "require", True),
+    ]:
+        settings = Settings(_env_file=None, database_url=f"postgresql://u:p@{host}/db", db_ssl=mode)
+        monkeypatch.setattr("app.core.db.get_settings", lambda settings=settings: settings)
+        options = engine_kwargs()["connect_args"]
+        assert (options.get("ssl") == "require") is expected_tls
+        assert options["timeout"] > 0
+
+
+def test_config_file_paths_do_not_depend_on_working_directory(monkeypatch) -> None:
+    from pathlib import Path
+
+    paths = Settings.model_config["env_file"]
+    assert all(Path(path).is_absolute() for path in paths)
+    monkeypatch.chdir(Path(__file__).resolve().parent)
+    assert Settings.model_config["env_file"] == paths
+
+
 def test_normalizer_accepts_neon_style_urls() -> None:
     """Vendor URLs work verbatim: driver added, libpq params stripped."""
     raw = (

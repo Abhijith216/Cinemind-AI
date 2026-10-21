@@ -27,10 +27,11 @@ import random
 import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, date, datetime
 from typing import Any
 
 import httpx
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -49,6 +50,10 @@ _BACKOFF_BASE_SECONDS = 0.5
 
 class TMDbError(RuntimeError):
     """Raised when a TMDb request fails for a non-retryable reason."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 @dataclass
@@ -75,16 +80,18 @@ class TMDbClient:
         api_key: str,
         *,
         base_url: str = TMDB_BASE_URL,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float = 10.0,
+        max_retries: int = _MAX_RETRIES,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         if not api_key:
-            raise TMDbError(
-                "TMDb API key is empty. Set TMDB_API_KEY in backend/.env"
-            )
+            raise TMDbError("TMDb API key is empty. Set TMDB_API_KEY in backend/.env")
+        # INFO request URLs would expose a v3 key in the query string.
+        logging.getLogger("httpx").setLevel(logging.WARNING)
         self._uses_bearer = api_key.startswith("eyJ")
         self._bearer = api_key if self._uses_bearer else None
         self._api_key = None if self._uses_bearer else api_key
+        self._max_retries = max(1, min(max_retries, _MAX_RETRIES))
         self._client = httpx.AsyncClient(
             base_url=base_url,
             timeout=timeout_seconds,
@@ -109,48 +116,42 @@ class TMDbClient:
             merged["api_key"] = self._api_key
 
         last_error: Exception | None = None
-        for attempt in range(_MAX_RETRIES):
+        for attempt in range(self._max_retries):
             try:
                 response = await self._client.get(
                     path,
                     params=merged,
                     headers=(
-                        {"Authorization": f"Bearer {self._bearer}"}
-                        if self._uses_bearer
-                        else None
+                        {"Authorization": f"Bearer {self._bearer}"} if self._uses_bearer else None
                     ),
                 )
-            except httpx.HTTPError as exc:  # network-level failure
-                last_error = exc
+            except httpx.HTTPError as exc:  # Never retain a credential-bearing URL.
+                last_error = TMDbError(type(exc).__name__)
                 await self._sleep_backoff(attempt)
                 continue
 
             if response.status_code == httpx.codes.TOO_MANY_REQUESTS or (
                 response.status_code >= 500
             ):
-                last_error = TMDbError(
-                    f"TMDb returned {response.status_code} for {path}"
-                )
-                await self._sleep_backoff(
-                    attempt, retry_after=response.headers.get("Retry-After")
-                )
+                last_error = TMDbError(f"TMDb returned {response.status_code} for {path}")
+                await self._sleep_backoff(attempt, retry_after=response.headers.get("Retry-After"))
                 continue
 
             if response.status_code >= 400:
                 raise TMDbError(
-                    f"TMDb returned {response.status_code} for {path}: "
-                    f"{response.text[:200]}"
+                    f"TMDb returned {response.status_code} for {path}",
+                    status_code=response.status_code,
                 )
             payload: dict[str, Any] = response.json()
             return payload
 
-        raise TMDbError(f"Gave up on {path} after {_MAX_RETRIES} attempts: {last_error}")
+        raise TMDbError(f"Gave up on {path} after {self._max_retries} attempts: {last_error}")
 
     async def _sleep_backoff(self, attempt: int, retry_after: str | None = None) -> None:
         """Sleep exponentially longer per attempt, honoring Retry-After."""
         if retry_after is not None:
             try:
-                await asyncio.sleep(max(0.0, float(retry_after)))
+                await asyncio.sleep(min(5.0, max(0.0, float(retry_after))))
                 return
             except ValueError:
                 pass  # malformed header — fall back to exponential backoff
@@ -176,18 +177,41 @@ class TMDbClient:
         payload = await self._get("/movie/top_rated", {"page": page})
         return list(payload.get("results", []))
 
+    async def released_movies(
+        self, page: int, *, since: date | None = None
+    ) -> list[dict[str, Any]]:
+        """Popular released films, optionally restricted to a recent date range."""
+        params: dict[str, Any] = {
+            "sort_by": "popularity.desc",
+            "include_adult": "false",
+            "include_video": "false",
+            "primary_release_date.lte": date.today().isoformat(),
+            "vote_count.gte": 20,
+            "page": page,
+        }
+        if since is not None:
+            params["primary_release_date.gte"] = since.isoformat()
+        payload = await self._get("/discover/movie", params)
+        return list(payload.get("results", []))
+
     async def movie_detail(self, tmdb_id: int) -> dict[str, Any]:
         """Full movie detail (genres with names, runtime, ...)."""
         return await self._get(f"/movie/{tmdb_id}")
+
+    async def search_movies(self, title: str) -> list[dict[str, Any]]:
+        payload = await self._get("/search/movie", {"query": title, "include_adult": "false"})
+        return list(payload.get("results", []))
+
+    async def movie_bundle(self, tmdb_id: int) -> dict[str, Any]:
+        """Fetch details and keywords together, including real poster paths."""
+        return await self._get(f"/movie/{tmdb_id}", {"append_to_response": "keywords"})
 
     async def movie_keywords(self, tmdb_id: int) -> dict[str, Any]:
         """Keyword list for a movie."""
         return await self._get(f"/movie/{tmdb_id}/keywords")
 
 
-def movie_row_from_tmdb(
-    detail: Mapping[str, Any], keywords: Mapping[str, Any]
-) -> dict[str, Any]:
+def movie_row_from_tmdb(detail: Mapping[str, Any], keywords: Mapping[str, Any]) -> dict[str, Any]:
     """Map a TMDb detail + keywords payload to a ``movies`` table row."""
     release_date = str(detail.get("release_date") or "")
     genres = detail.get("genres") or []
@@ -207,6 +231,8 @@ def movie_row_from_tmdb(
         "popularity": detail.get("popularity"),
         # Module 7 will fill personality; ingestion leaves it empty.
         "personality": None,
+        "tmdb_checked_at": datetime.now(UTC),
+        "tmdb_synced_at": datetime.now(UTC),
     }
 
 
@@ -223,16 +249,39 @@ _UPDATABLE_COLUMNS = (
     "vote_count",
     "popularity",
     "personality",
+    "tmdb_checked_at",
+    "tmdb_synced_at",
 )
 
 
 async def upsert_movie(session: AsyncSession, row: Mapping[str, Any]) -> None:
     """Insert a movie row, or update the existing one matched on tmdb_id."""
-    statement = pg_insert(Movie).values(**dict(row))
+    await upsert_movies(session, [row])
+
+
+async def upsert_movies(session: AsyncSession, rows: list[Mapping[str, Any]]) -> None:
+    """Bulk upsert public metadata while preserving IDs, ratings and personality."""
+    if not rows:
+        return
+    statement = pg_insert(Movie).values([dict(row) for row in rows])
+    content_changed = (
+        Movie.title.is_distinct_from(statement.excluded.title)
+        | Movie.overview.is_distinct_from(statement.excluded.overview)
+        | Movie.genres.is_distinct_from(statement.excluded.genres)
+        | Movie.keywords.is_distinct_from(statement.excluded.keywords)
+    )
     statement = statement.on_conflict_do_update(
         index_elements=[Movie.__table__.c.tmdb_id],
         set_={
             **{column: statement.excluded[column] for column in _UPDATABLE_COLUMNS},
+            "personality": func.coalesce(statement.excluded.personality, Movie.personality),
+            "tmdb_checked_at": func.coalesce(
+                statement.excluded.tmdb_checked_at, Movie.tmdb_checked_at
+            ),
+            "tmdb_synced_at": func.coalesce(
+                statement.excluded.tmdb_synced_at, Movie.tmdb_synced_at
+            ),
+            "embedding": case((content_changed, None), else_=Movie.embedding),
             "updated_at": func.now(),
         },
     )
@@ -270,9 +319,7 @@ async def ingest_movies(
                 tmdb_id = int(list_item["id"])
                 candidates.setdefault(tmdb_id, list_item)
         stats.discovered = len(candidates)
-        logger.info(
-            "Discovered %d unique movies from %d pages per list", len(candidates), pages
-        )
+        logger.info("Discovered %d unique movies from %d pages per list", len(candidates), pages)
 
         # 2) Fetch detail + keywords per movie and upsert, skipping failures.
         for position, (tmdb_id, _list_item) in enumerate(candidates.items(), start=1):
@@ -300,7 +347,7 @@ async def ingest_movies(
                     position,
                     len(candidates),
                     tmdb_id,
-                    exc,
+                    type(exc).__name__,
                 )
                 continue
 

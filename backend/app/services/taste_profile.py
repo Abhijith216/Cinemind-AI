@@ -132,9 +132,7 @@ async def update_taste_profile(
     )
 
 
-async def get_taste_profile(
-    session: AsyncSession, user_id: uuid.UUID
-) -> TasteProfileOut | None:
+async def get_taste_profile(session: AsyncSession, user_id: uuid.UUID) -> TasteProfileOut | None:
     """Return the user's current profile, or None if they never rated."""
     profile = await session.get(UserTasteProfile, user_id)
     if profile is None:
@@ -146,6 +144,72 @@ async def get_taste_profile(
         favorite_themes=_string_list(profile.favorite_themes),
         updated_at=profile.updated_at,
     )
+
+
+async def rebuild_taste_profile(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Derive current preferences from saved scores, including corrected ratings.
+
+    The caller owns the transaction. Rebuilding removes stale signals when a
+    formerly loved film is re-rated neutral or disliked.
+    """
+    rows = (
+        await session.execute(
+            select(Movie, Rating.score)
+            .join(Rating, Rating.movie_id == Movie.id)
+            .where(Rating.user_id == user_id)
+            .order_by(Rating.rated_at, Rating.id)
+        )
+    ).all()
+    likes: list[str] = []
+    dislikes: list[str] = []
+    themes: list[str] = []
+    for movie, score in rows:
+        tags = [*_string_list(movie.genres or []), *_string_list(movie.keywords or [])]
+        if score >= LIKED_THRESHOLD:
+            likes = merge_tags(likes, tags)
+            themes = merge_tags(themes, _string_list(movie.keywords or []))
+        elif score <= DISLIKED_THRESHOLD:
+            dislikes = merge_tags(dislikes, tags)
+    profile = await session.get(UserTasteProfile, user_id)
+    if profile is None:
+        profile = UserTasteProfile(user_id=user_id)
+        session.add(profile)
+    profile.likes, profile.dislikes, profile.favorite_themes = likes, dislikes, themes
+    profile.updated_at = datetime.datetime.now(datetime.UTC)
+
+
+async def live_taste_evolution(session: AsyncSession, user_id: uuid.UUID) -> list[dict[str, Any]]:
+    """Compute monthly favorites directly from ratings; no scheduled job needed."""
+    rows = (
+        await session.execute(
+            select(Movie.genres, Movie.keywords, Rating.score, Rating.rated_at)
+            .join(Rating, Rating.movie_id == Movie.id)
+            .where(Rating.user_id == user_id, Rating.score >= LIKED_THRESHOLD)
+            .order_by(Rating.rated_at)
+        )
+    ).all()
+    months: dict[str, list[MonthRating]] = {}
+    for genres, keywords, score, rated_at in rows:
+        month = rated_at.strftime("%Y-%m")
+        months.setdefault(month, []).append(
+            MonthRating(
+                genres=_string_list(genres or []),
+                keywords=_string_list(keywords or []),
+                score=score,
+            )
+        )
+    snapshots = []
+    for month, ratings in sorted(months.items()):
+        genres, themes = compute_dominant(ratings)
+        snapshots.append(
+            {
+                "user_id": user_id,
+                "month": month,
+                "dominant_genres": genres,
+                "dominant_themes": themes,
+            }
+        )
+    return snapshots
 
 
 # ---------------------------------------------------------------------------
@@ -195,9 +259,7 @@ def compute_dominant(
             theme_weight[keyword.lower()] = (weight + rating.score, count + 1)
 
     def ranked(weights: dict[str, tuple[int, int]]) -> list[str]:
-        ordered = sorted(
-            weights.items(), key=lambda item: (-item[1][0], -item[1][1], item[0])
-        )
+        ordered = sorted(weights.items(), key=lambda item: (-item[1][0], -item[1][1], item[0]))
         return [tag for tag, _ in ordered[:MAX_DOMINANT_ITEMS]]
 
     return ranked(genre_weight), ranked(theme_weight)
@@ -254,9 +316,7 @@ async def snapshot_monthly(
     dominant_genres, dominant_themes = compute_dominant(month_ratings)
 
     snapshot = await session.execute(
-        select(TasteSnapshot).where(
-            TasteSnapshot.user_id == user_id, TasteSnapshot.month == month
-        )
+        select(TasteSnapshot).where(TasteSnapshot.user_id == user_id, TasteSnapshot.month == month)
     )
     row = snapshot.scalar_one_or_none()
     if row is None:
@@ -310,14 +370,14 @@ async def _run(args: argparse.Namespace) -> int:
 
     session_factory = get_sessionmaker()
     async with session_factory() as session:
-        snapshot = await snapshot_monthly(
-            session, uuid.UUID(args.user_id), month=args.month
-        )
+        snapshot = await snapshot_monthly(session, uuid.UUID(args.user_id), month=args.month)
     if snapshot is None:
         print(f"No ratings found for {args.month or 'the current month'} — nothing written.")
         return 1
-    print(f"Snapshot {snapshot.month} written: genres={snapshot.dominant_genres} "
-          f"themes={snapshot.dominant_themes}")
+    print(
+        f"Snapshot {snapshot.month} written: genres={snapshot.dominant_genres} "
+        f"themes={snapshot.dominant_themes}"
+    )
     return 0
 
 

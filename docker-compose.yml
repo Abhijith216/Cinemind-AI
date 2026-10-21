@@ -22,15 +22,31 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    environment:
+    environment: &backend_environment
       DATABASE_URL: postgresql+asyncpg://cinemind:cinemind@db:5432/cinemind
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-prod}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in backend/.env}
       TMDB_API_KEY: ${TMDB_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
-      CORS_ORIGINS: http://localhost:3000
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
+      LLM_MODEL: ${LLM_MODEL:-openrouter/free}
+      LLM_STRUCTURED_OUTPUTS: ${LLM_STRUCTURED_OUTPUTS:-true}
+      LLM_DISABLE_REASONING: ${LLM_DISABLE_REASONING:-true}
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      RATE_LIMIT_BACKEND: database
     ports:
       - "8000:8000"
+
+  catalog-refresh:
+    build: ./backend
+    profiles: [maintenance]
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment: *backend_environment
+    command: ["python", "-m", "app.services.catalog_refresh", "--limit", "1000", "--pages", "10", "--interval-hours", "24"]
+    restart: unless-stopped
+    healthcheck:
+      disable: true
 
   frontend:
     build:
@@ -38,6 +54,8 @@ services:
       args:
         NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
     container_name: cinemind-frontend
+    environment:
+      API_INTERNAL_BASE_URL: http://backend:8000
     depends_on:
       - backend
     ports:

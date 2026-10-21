@@ -21,7 +21,7 @@ services:
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     plan: free
-    healthCheckPath: /health
+    healthCheckPath: /ready
     autoDeploy: true
     # NOTE: Docker-runtime services don't support a blueprint preDeploy hook.
     # Migrations instead run in the container entrypoint (backend/start.sh)
@@ -41,9 +41,13 @@ services:
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_BASE_URL
-        value: https://api.openai.com/v1
+        value: https://openrouter.ai/api/v1
       - key: LLM_MODEL
-        value: gpt-4o-mini
+        value: openrouter/free
+      - key: LLM_STRUCTURED_OUTPUTS
+        value: "true"
+      - key: LLM_DISABLE_REASONING
+        value: "true"
       - key: EMBEDDING_MODEL
         value: text-embedding-3-large
       - key: EMBEDDING_DIMENSIONS
@@ -54,6 +58,8 @@ services:
         value: "10"
       - key: SEARCH_RATE_LIMIT_PER_MINUTE
         value: "30"
+      - key: RATE_LIMIT_BACKEND
+        value: database
       - key: LOG_FORMAT
         value: json
       - key: LOG_LEVEL

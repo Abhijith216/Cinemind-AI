@@ -1,7 +1,11 @@
 """Shared database setup: engine, session factory, FastAPI dependency."""
 
+import asyncio
 from collections.abc import AsyncGenerator
 
+from fastapi import HTTPException
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -26,10 +30,20 @@ def engine_kwargs() -> dict[str, object]:
     kwargs: dict[str, object] = {
         "echo": False,
         "pool_pre_ping": True,
-        "pool_recycle": 1800,
+        "pool_recycle": 60,
+        "pool_timeout": 5,
     }
-    if settings.db_ssl == "require":
-        kwargs["connect_args"] = {"ssl": "require"}
+    connect_args: dict[str, object] = {"timeout": 15, "command_timeout": 15}
+    remote_database = make_url(settings.database_url).host not in {
+        None,
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "db",
+    }
+    if settings.db_ssl == "require" or (settings.db_ssl == "auto" and remote_database):
+        connect_args["ssl"] = "require"
+    kwargs["connect_args"] = connect_args
     return kwargs
 
 
@@ -51,20 +65,41 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency yielding a database session (auto-commit/close)."""
-    session = get_sessionmaker()
-    async with session() as db:
+    db = get_sessionmaker()()
+    try:
+        yield db
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+
+
+async def ensure_database_connection(db: AsyncSession) -> None:
+    """Recover before the first query, after request validation, without replaying writes."""
+    for attempt in range(2):
         try:
-            yield db
-            await db.commit()
-        except Exception:
+            async with asyncio.timeout(10):
+                await db.connection()
+            return
+        except (SQLAlchemyError, OSError, TimeoutError) as exc:
             await db.rollback()
-            raise
+            await get_engine().dispose()
+            if attempt:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "The movie catalog is temporarily unavailable. Please try again shortly."
+                    ),
+                ) from exc
 
 
 async def dispose_engine() -> None:
     """Dispose the engine (used on app shutdown and in tests)."""
     global _engine, _sessionmaker
-    if _engine is not None:
-        await _engine.dispose()
+    engine = _engine
     _engine = None
     _sessionmaker = None
+    if engine is not None:
+        await engine.dispose()
