@@ -1,6 +1,6 @@
 # Stage 4: release-readiness and management work
 
-Implemented and locally verified on 2026-10-21–22. This stage adds management controls and deployment safeguards; the Docker/hosted-CI execution and remaining limits below still matter before public release.
+Implemented and verified on 2026-10-21–22. This stage adds management controls and deployment safeguards. Hosted Docker and CI verification passed; the remaining deployment limits below still matter before public release.
 
 ## Completed
 
@@ -37,11 +37,11 @@ The updated backend (database limiter enabled) and production frontend are runni
 
 The compatible PostCSS override and lockfile update resolve the runtime npm findings. `npm audit --omit=dev --audit-level=high` reports **zero vulnerabilities**.
 
-The full npm audit still reports **five high development-only entries** in the braces → micromatch → fast-glob → Next ESLint chain. The registry's latest braces version checked was 3.0.3; the [reviewed upstream advisory](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) lists no patched release. These tools process development/lint patterns, not movie requests in the deployed standalone app. A forced Next/ESLint downgrade was not applied. CI uses isolated, time-limited jobs with no deployment secrets and audits runtime dependencies. This is an npm exposure review, not a comprehensive security certification or a Python dependency vulnerability scan.
+The full npm audit still reports **five high development-only entries** in the braces → micromatch → fast-glob → Next ESLint chain. The registry's latest braces version checked was 3.0.3; the [reviewed upstream advisory](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) lists no patched release. These five entries trace to one upstream vulnerability. npm's proposed fix is a major downgrade to `eslint-config-next@14.2.35`, which does not match this Next 15 app, so it was not applied. These tools process development/lint patterns, not movie requests in the deployed standalone app. CI uses isolated, time-limited jobs with no deployment secrets and audits runtime dependencies. This is an npm exposure review, not a comprehensive security certification or a Python dependency vulnerability scan.
 
 ## Deployment and retention decisions
 
-1. **Run Docker/CI before publishing.** Docker is not installed here, so image builds and actual container smoke execution could not be run locally. The CI workflow is ready but has not been pushed or executed on GitHub during this task. Local standalone/browser/API checks do not substitute for that remaining deployment proof.
+1. **Docker/CI passed on GitHub.** Docker is not installed locally, but the [hosted workflow run](https://github.com/Abhijith216/Cinemind-AI/actions/runs/39736808937) built and started the isolated Compose stack, passed the HTTP smoke flow, and passed backend and frontend jobs. The first run caught a smoke fixture email using the reserved `.invalid` domain; the fixture was corrected and the full workflow rerun passed.
 2. **Configure trusted ingress and secrets.** All replicas must share the signing/HMAC secret and use database rate limits. Set `FORWARDED_ALLOW_IPS` to actual trusted proxy addresses/networks; avoid trusting arbitrary client forwarding headers. Without trusted ingress configuration, proxied clients may share a proxy's budget. Use a unique strong JWT secret, correct CORS origins, and the intended browser/internal API URLs. Existing credentials were not changed.
 3. **Retention is manual.** Saved conversations remain until explicitly deleted; New chat is not deletion. Account history makes older chats reachable. Anonymous access relies on the unlisted ID retained in the current browser tab; losing it does not automatically remove the server record. No bulk expiry was enabled against existing conversations. Define any future automatic retention period before scheduling deletion.
 4. **Earlier limits remain.** Free OpenRouter availability, verified pace/violence/ending coverage, and the optional embedding/personality pipeline are not guaranteed by this stage. Watchlist, richer film details and additional browse controls remain optional next-stage features.
