@@ -43,9 +43,9 @@ def main() -> None:
     assert request("/movie/" + str(uuid.uuid4()), frontend=True)[0] == 404
     assert request("/api/search/discover", method="POST", body={"query": "comedy"})[0] == 200
     status, body = request("/api/auth/register", method="POST", body={
-        "email": f"smoke-{uuid.uuid4()}@example.invalid", "password": uuid.uuid4().hex,
+        "email": f"smoke-{uuid.uuid4()}@example.com", "password": uuid.uuid4().hex,
     })
-    assert status == 201
+    assert status == 201, f"registration returned HTTP {status}: {body[:300]!r}"
     token = json.loads(body)["access_token"]
     status, body = request("/api/chat/message", method="POST", token=token, body={"message": "hey"})
     assert status == 200
